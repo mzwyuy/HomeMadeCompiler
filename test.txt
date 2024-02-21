@@ -1,0 +1,15 @@
+/*int calculate(int a, int b); todo: declaration and definition are apart*/
+
+int calculate(int a, int b) {
+    return a * a + b * b; /*todo: (a = b + c) * d */
+}
+
+int main() {
+    int x = 10;
+    int y = 5;
+
+    int result = (x + y) * calculate(x, y);
+
+    return 0;
+}
+
