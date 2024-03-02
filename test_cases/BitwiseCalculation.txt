@@ -1,0 +1,17 @@
+int BitwiseSum(int a, int b) {
+    while (b != 0) {
+        unsigned int carry = (unsigned int)(a & b) << 1;
+        a = a ^ b;
+        b = carry;
+    }
+    return a;
+}
+
+int main() {
+    printf("expect: %d %d %d %d %d\n", 772 + 1240, 912 - 7717, 1120 + 999, 998 - 999, 798 + 1314);
+    printf("result: %d %d %d %d %d\n", BitwiseSum(772, 1240), BitwiseSum(912, -7717), BitwiseSum(1120, 999),
+           BitwiseSum(998, -999), BitwiseSum(798, 1314));
+
+    return 0;
+}
+// https://leetcode.cn/problems/sum-of-two-integers/

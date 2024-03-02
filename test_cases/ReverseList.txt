@@ -1,0 +1,30 @@
+struct ListNode {
+     int val;
+     ListNode *next;
+     ListNode() {
+         val = 0;
+         next = 0;
+     }
+     ListNode(int x) {
+         val = x;
+         next = 0;
+     }
+     ListNode(int x, ListNode *next) {
+         val = x;
+         next = 0;
+     }
+ };
+
+ListNode* reverseList(ListNode* head) {
+    ListNode* prev = NULL;
+    ListNode* curr = head;
+    while (curr) {
+        ListNode* next = curr->next;
+        curr->next = prev;
+        prev = curr;
+        curr = next;
+    }
+    return prev;
+}
+
+// https://leetcode.cn/problems/reverse-linked-list/

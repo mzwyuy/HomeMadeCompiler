@@ -1,0 +1,24 @@
+int reverse(int x) {
+    int rev = 0;
+    while (x != 0) {
+        if (rev < INT_MIN / 10 || rev > INT_MAX / 10) {
+            return 0;
+        }
+        int digit = x % 10;
+        x /= 10;
+        rev = rev * 10 + digit;
+    }
+    return rev;
+}
+
+int main() {
+    int a = 7354;
+    int b = 5113;
+    int c = -1314;
+    int d = -8848;
+    printf("expect: %d %d %d %d\n", 4537, 3115, -4131, -8488);
+    printf("result: %d %d %d %d\n", reverse(7354), reverse(5113), reverse(-1314), reverse(-8848));
+
+    return 0;
+}
+// source: https://leetcode.cn/problems/reverse-integer/description/

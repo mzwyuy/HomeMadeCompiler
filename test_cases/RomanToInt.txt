@@ -31,4 +31,17 @@ int romanToInt(char* s) {
     }
     return ans;
 }
+
+int main() {
+    char roman_str0[10] = "DCCLXVII";
+    char roman_str1[10] = "CXLIII";
+    char roman_str2[10] = "XCI";
+    char roman_str3[10] = "MCCCXIV";
+    char roman_str4[10] = "MCMXCIV";
+
+    printf("expect: %d %d %d %d %d\n", 767, 143, 91, 1314, 1994);
+    printf("result: %d %d %d %d %d\n", romanToInt(roman_str0), romanToInt(roman_str1), romanToInt(roman_str2),
+           romanToInt(roman_str3), romanToInt(roman_str4));
+    return 0;
+}
 /* source: https://leetcode.cn/problems/roman-to-integer/ */
