@@ -31,7 +31,7 @@ public:
     }
 
 private:
-    std::vector<void *> heap_spaces_;
+    std::vector<void *> heap_spaces_ = {};
 };
 
 extern MemoryCollector memory_collect;
@@ -75,7 +75,7 @@ public:
     OPERATOR_NEW
 
     enum type_enum {
-        TVoid = 0, TBool = 1, TChar = 2, TShort = 3, TInt = 4, TLong = 5
+        TVoid = 0, TBool = 1, TChar = 2, TShort = 3, TUInt = 4, TInt = 5, TULong = 6, TLong = 7
     };
 
     unsigned GetSize() {
@@ -96,8 +96,14 @@ public:
             case TShort:
                 size = 2;
                 break;
+            case TUInt:
+                size = 4;
+                break;
             case TInt:
                 size = 4;
+                break;
+            case TULong:
+                size = 8;
                 break;
             case TLong:
                 size = 8;
@@ -135,14 +141,41 @@ class IRConst : public IRExpr {
 public:
     OPERATOR_NEW
 
-    bool IsConst() override { return true; }
+    bool IsConst() override {return true;}
+    virtual void Display(std::ostream &os, unsigned lv = 0) = 0;
+};
+
+class IRNum : public IRConst {
+public:
+    OPERATOR_NEW
 
     virtual void Display(std::ostream &os, unsigned lv = 0) {
         os << val_;
     }
 
     IRType::type_enum type_ = IRType::TLong;
-    long val_;
+    long val_ = 0;
+};
+
+class IRChar : public IRConst {
+public:
+    OPERATOR_NEW
+
+    virtual void Display(std::ostream& os, unsigned lv = 0) {
+        os << "\"" << ch_ << "\"";
+    }
+    char ch_ = 0;
+};
+
+class IRStr : public IRConst {
+public:
+    ~IRStr() {
+        if (str_) free(str_);
+    }
+    OPERATOR_NEW
+
+    virtual void Display(std::ostream& os, unsigned lv = 0) {}
+    char* str_ = nullptr;
 };
 
 class IRVar : public IRExpr {
@@ -158,11 +191,11 @@ public:
         os << name_;
     }
 
-    bool is_externed_;
+    bool is_externed_ = false;
     bool is_left_ = true;
-    int offset_;
-    IRType *type_;
-    IRExpr *initial_val_;
+    int offset_ = 0;
+    IRType *type_ = nullptr;
+    IRExpr *initial_val_ = nullptr;
     IRScope *scope_ = nullptr;  // need?
     std::string name_;
 };
@@ -205,7 +238,7 @@ public:
 
     virtual void Display(std::ostream &os, unsigned lv = 0);
 
-    IRFunc *func_;
+    IRFunc *func_ = nullptr;
     std::vector<IRExpr *> args_;
 };
 
@@ -282,7 +315,7 @@ public:
     std::vector<IRVar *> vars_;
     std::unordered_map<std::string, IRVar *> name_to_vars_;
     // std::vector<InterInst*> inter_insts_;
-    IRScope *upper_;
+    IRScope *upper_ = nullptr;
     unsigned unique_var_idx_ = 0;
     unsigned size_ = 0;   // actual size
     unsigned largest_len_ = 0;
@@ -338,7 +371,7 @@ public:
 
     virtual void Display(std::ostream &os, unsigned lv = 0);
 
-    IRType *ret_type_;
+    IRType *ret_type_ = nullptr;
     std::vector<IRVar *> params_;
 };
 
@@ -391,8 +424,8 @@ public:
     }
 
 private:
-    IRScope *gloabl_scope_;
-    IRScope *cur_scope_;
+    IRScope *gloabl_scope_ = nullptr;
+    IRScope *cur_scope_ = nullptr;
     std::unordered_map<std::string, IRFunc *> name_to_func_;
 };
 
@@ -415,7 +448,7 @@ public:
         func_->Display(os, lv);
     }
 
-    IRFunc *func_;
+    IRFunc *func_ = nullptr;
 };
 
 /*
@@ -437,7 +470,7 @@ public:
         os << ";";
     }
 
-    IRExpr *expr_;
+    IRExpr *expr_ = nullptr;
 };
 
 class IRIfElse : public IRStmt {
@@ -454,9 +487,9 @@ public:
         else_stmt_->Display(os, lv + 4);
     }
 
-    IRExpr *condition_;
-    IRStmt *then_stmt_;
-    IRStmt *else_stmt_;
+    IRExpr *condition_ = nullptr;
+    IRStmt *then_stmt_ = nullptr;
+    IRStmt *else_stmt_ = nullptr;
 };
 
 // todo: other loop stmts
@@ -468,15 +501,33 @@ public:
         std::string spaces(lv, ' ');
         os << spaces << "for (";
         init_->Display(os, 0);
+        os << "; ";
         condition_->Display(os, 0);
+        os << "; ";
         iteration_->Display(os, 0);
-        for_body_->Display(os, 0);
+        os << ") ";
+        for_body_->Display(os, lv);
     }
 
-    IRStmt *init_;
-    IRExpr *condition_;
-    IRStmt *iteration_;
-    IRStmt *for_body_;
+    IRStmt *init_ = nullptr;
+    IRExpr *condition_ = nullptr;
+    IRStmt *iteration_ = nullptr;
+    IRStmt *for_body_ = nullptr;
+};
+
+class IRWhile : public IRStmt {
+public:
+    OPERATOR_NEW
+
+    virtual void Display(std::ostream &os, unsigned lv = 0) {
+        std::string spaces(lv, ' ');
+        os << spaces << "while (";
+        condition_->Display(os, 0);
+        os << ")";
+        while_body_->Display(os, lv);
+    }
+    IRExpr *condition_ = nullptr;
+    IRStmt* while_body_ = nullptr;
 };
 
 // jump stmts
@@ -534,7 +585,8 @@ public:
         LexemeInterpreter interpreter(file_in, filename);
         interpreter.Interprete();
         tokens_ = interpreter.GetTokens();
-        iter = tokens_.begin();
+        cur_pos_ = 0;
+        // iter = tokens_.begin();
     }
 
     IRCodeBlock *SyntaxInpterprete() {
@@ -549,14 +601,20 @@ public:
 
     // todo: tail is nullptr!
     TinyToken *step() {
-        return *(iter++);
+        if (cur_pos_ >= tokens_.size()) {
+            return nullptr;
+        } else {
+            return tokens_[cur_pos_++];
+            // return *(iter++);
+        }
     }
 
     TinyToken *peek() {
-        if (iter != tokens_.end()) {
-            return *iter;
-        } else {
+        if (cur_pos_ >= tokens_.size()) {
             return nullptr;
+        } else {
+            return tokens_[cur_pos_];
+            // return *(iter);
         }
     }
 
@@ -585,8 +643,9 @@ public:
     IRVar *ParseLea(IRVar *var);
 
 private:
-    SymTable *sym_table_;
+    SymTable *sym_table_ = nullptr;
     IRCodeBlock *global_block_ = nullptr;
-    std::list<TinyToken *> tokens_;
-    std::list<TinyToken *>::iterator iter;
+    std::vector<TinyToken *> tokens_;
+    unsigned cur_pos_ = 0;
+    // std::vector<TinyToken *>::iterator iter;
 };

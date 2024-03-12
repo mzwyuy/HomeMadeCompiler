@@ -5,19 +5,20 @@
 #include <unordered_set>
 #include <iostream>
 #include <list>
+#include <vector>
 #include "buffer_read.h"
 
 using std::string;
 
 enum KeyWord {
-    KW_NONE = 0, KW_ERR, KW_END, KW_ID, KW_NUM,
+    KW_NONE = 0, /*KW_ERR, KW_END, KW_ID, KW_NUM, KW_STR,*/
     /*used in type or decl*/
-    KW_STR, KW_LONG, KW_INT, KW_CHAR, KW_BOOL, KW_VOID,
+    KW_LONG, KW_ULONG, KW_INT, KW_UINT, KW_CHAR, KW_BOOL, KW_VOID,
     KW_EXTERN, KW_CONST,
     /*used in stmt*/
     KW_IF, KW_ELSE, KW_SWITCH, KW_CASE, KW_WHILE, KW_DO, KW_FOR, KW_BREAK, KW_CONTINUE, KW_RETURN,
     /*used in unary expr*/
-    KW_NOT, KW_NEGATE, KW_LEA, KW_DEREF, KW_INC, KW_DEC, KW_RDEC, KW_RINC,
+    KW_NOT, KW_NEGATE, KW_LEA, KW_DEREF, KW_LINC, KW_LDEC, KW_RDEC, KW_RINC,
     /*used in binary expr*/
     KW_ADD, KW_SUB, KW_MUL, KW_DIV, KW_MOD,
     KW_AND, KW_OR, KW_ASSIGN, KW_GT,
@@ -27,7 +28,7 @@ enum KeyWord {
     KW_LPAREN, KW_RPAREN/*()*/,
     KW_LBRAC, KW_RBRAC/*{}*/, KW_LSBRAC, KW_RSBRAC/*[]*/,
 
-    KW_ASTERISK, KW_DEFAULT,
+    /* KW_ASTERISK, replaced by KW_MUL */ KW_DEFAULT,
 };
 
 extern const char *KeyWordToStr(KeyWord key_word);
@@ -71,6 +72,8 @@ public:
 
     virtual long GetNum() { return 0; }
 
+    virtual char GetChar() {return 0; }
+
     virtual unsigned GetPriority() { return 0; }
 
     virtual bool IsUnary() { return false; }
@@ -112,9 +115,6 @@ public:
 
     unsigned GetPriority() override {
         switch (key_word_) {
-            // (
-            case KW_LPAREN:
-                return 11;
                 // =
             case KW_ASSIGN:
                 return 10;
@@ -146,14 +146,14 @@ public:
             case KW_NEGATE:
             case KW_LEA:
             case KW_DEREF:
-            case KW_INC:
-            case KW_DEC:
+            case KW_LINC:
+            case KW_LDEC:
                 return 4;
-                // ++ --
             case KW_RINC:
             case KW_RDEC:
                 return 3;
                 // ()
+            case KW_LPAREN:
             case KW_RPAREN:
                 return 2;
                 // []
@@ -165,6 +165,19 @@ public:
         }
     }
 
+    bool IsLeftPrior(TinyKeyWord *right) {
+        // this function return whether let left operator get out of stack (true) or not (false)
+        unsigned left_priority = GetPriority();
+        unsigned right_priority = right->GetPriority();
+        assert(left_priority && right_priority);
+
+        if (left_priority == right_priority) {  // left associative
+            return left_priority != 10 && left_priority != 4;
+        } else {
+            return left_priority < right_priority;
+        }
+    }
+
     // left unary: 4, right unary: 3
     bool IsUnary() override {  // unary operator
         unsigned priority = GetPriority();
@@ -173,7 +186,7 @@ public:
 
     bool IsBinary() override {  // binary operator
         unsigned priority = GetPriority();
-        return priority && priority != 4 && priority != 3;
+        return priority >= 5;
     }
 
 private:
@@ -188,6 +201,7 @@ public:
 
     // ~TinyChar() {}
     string ToString() { return string(1, ch_); }
+    char GetChar() { return ch_; }
 
     bool IsChar() { return true; }
 
@@ -228,10 +242,6 @@ public:
 
                 auto key_word = TinyToken::GetKeyWord(str);
                 if (key_word) {
-                    if ((key_word == KW_SUB || key_word == KW_MUL) && tokens_.back()->GetKeyWord()) {
-                        // unary operator
-                        key_word = key_word == KW_SUB ? KW_NEGATE : KW_DEREF;
-                    }
                     tokens_.push_back(new TinyKeyWord(key_word));
                 } else {
                     tokens_.push_back(new TinyId(std::move(str)));
@@ -248,27 +258,60 @@ public:
                     ch = buffer_read_.AdvanceAndGetChar();
                 }
                 tokens_.push_back(new TinyNum(num));
+            } else if (ch == '\'') {
+                char single_char = 0;
+                ch = buffer_read_.AdvanceAndGetChar();
+                if (ch == '\\') {
+                    ch = buffer_read_.AdvanceAndGetChar();
+                    // same code as in parse "..."
+                    if (ch == '\\') {
+                        single_char = '\\';
+                    } else if (ch == 'n') {
+                        single_char = '\n';
+                    } else if (ch == 't') {
+                        single_char = '\t';
+                    } else if (ch == '\"') {
+                        single_char = '\"';
+                    } else if (ch == '\'') {
+                        single_char = '\'';
+                    } else if (ch == '0') {
+                        single_char = '\0';
+                    } else {
+                        assert(0);
+                    }
+                } else {
+                    single_char = ch;
+                }
+                ch = buffer_read_.AdvanceAndGetChar();
+                assert(ch == '\'');
+                ch = buffer_read_.AdvanceAndGetChar();
+                tokens_.push_back(new TinyChar(single_char));
             } else if (ch == '\"') {
                 ch = buffer_read_.AdvanceAndGetChar();
                 while (ch != '"') {
                     if (ch == '\\') {
                         ch = buffer_read_.AdvanceAndGetChar();
+                        // same code as in parse '...'
                         if (ch == '\\') {
                             str.push_back('\\');
                         } else if (ch == 'n') {
                             str.push_back('\n');
                         } else if (ch == 't') {
                             str.push_back('\t');
-                        } else if (ch == '"') {
-                            str.push_back('"');
+                        } else if (ch == '\"') {
+                            str.push_back('\"');
                         } else if (ch == '\'') {
                             str.push_back('\'');
+                        } else if (ch == '0') {
+                            str.push_back('\0');
                         } else if (ch == '\n') {
                             RaiseError("Not support \n.");
                         } else if (ch == -1) {
                             RaiseError("Invalid string: -1.");
-                        } else {
-                            str.push_back('\\' + ch);
+                        } else {  // '\' must be used as escape character?
+                            RaiseError("Invalid string: \\.");
+                            /* str.push_back('\\');
+                            str.push_back(ch);*/
                         }
                     } else if (ch == '\n' || ch == -1) {
                         RaiseError("Invalid string: file end or without right \".");
@@ -277,6 +320,7 @@ public:
                     }
                     ch = buffer_read_.AdvanceAndGetChar();
                 }
+                ch = buffer_read_.AdvanceAndGetChar();
                 tokens_.push_back(new TinyStr(str));
             } else if (ch == -1) {
                 // reach the end of file
@@ -284,13 +328,23 @@ public:
             } else if (TinyToken::IsSingleKeyWord(ch)) {
                 // some keywords don't need space to separate
                 char next_ch = buffer_read_.AdvanceAndGetChar();
+                bool is_last_token_operand = false;
+                if (!tokens_.empty()) {
+                    auto last_token = tokens_.back();
+                    // (...) or arr[idx] is operand, others can only be operators!
+                    is_last_token_operand = last_token->IsId() || (last_token->GetKeyWord() == KW_RPAREN ||
+                                                                   last_token->GetKeyWord() == KW_RSBRAC);
+                }
                 str.push_back(ch);
-                if ((ch == '+' && next_ch == '+') || (ch == '-' && next_ch == '-') || (ch == '>' && next_ch == '=') ||
-                    (ch == '<' && next_ch == '=') || (ch == '&' && next_ch == '&') || (ch == '|' && next_ch == '|') ||
-                    (ch == '=' && next_ch == '=') || (ch == '!' && next_ch == '=')) {
+                if ((ch == '>' && next_ch == '=') || (ch == '<' && next_ch == '=') || (ch == '&' && next_ch == '&') ||
+                    (ch == '|' && next_ch == '|') || (ch == '=' && next_ch == '=') || (ch == '!' && next_ch == '=')) {
                     // ++, -- && || >= <= ==
                     str.push_back(next_ch);
                     ch = buffer_read_.AdvanceAndGetChar();
+                } else if (ch == '+' && next_ch == '+' && !is_last_token_operand) {
+                    tokens_.push_back(new TinyKeyWord(KW_RINC));
+                } else if (ch == '-' && next_ch == '-' && !is_last_token_operand) {
+                    tokens_.push_back(new TinyKeyWord(KW_RDEC));
                 } else if (ch == '/' && next_ch == '*') {
                     // todo: need to add IRComment node
                     ch = buffer_read_.AdvanceAndGetChar();
@@ -301,9 +355,19 @@ public:
                     }
                     ch = buffer_read_.AdvanceAndGetChar();
                     continue;
+                } else if (ch == '+' && !is_last_token_operand) {
+                    // skip '+'
+                } else if (ch == '-' && !is_last_token_operand) {
+                    tokens_.push_back(new TinyKeyWord(KW_NEGATE));
+                    continue;
+                } else if (ch == '*' && !is_last_token_operand) {
+                    tokens_.push_back(new TinyKeyWord(KW_DEREF));
+                    continue;
+                } else if (ch == '&' && !is_last_token_operand) {
+                    // todo: otherwise bit and, need to support bitwise operators
+                    tokens_.push_back(new TinyKeyWord(KW_LEA));
                 } else {
                     // ( ) { } [ ] ...
-                    ch = next_ch;
                 }
                 auto key_word = TinyToken::GetKeyWord(str);
                 assert(key_word != 0);
@@ -336,9 +400,9 @@ public:
         assert(0);
     }
 
-    std::list<TinyToken *> &&GetTokens() { return std::move(tokens_); }
+    std::vector<TinyToken *> &&GetTokens() { return std::move(tokens_); }
 
 private:
     BufferRead buffer_read_;
-    std::list<TinyToken *> tokens_;
+    std::vector<TinyToken *> tokens_;
 };

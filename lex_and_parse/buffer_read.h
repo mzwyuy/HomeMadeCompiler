@@ -20,7 +20,7 @@ class BufferRead {
             if (buffer_len_ != buffer_len) {
                 return -1;
             } else {
-                buffer_len_ = fread(buffer, 1, 100, file);
+                buffer_len_ = fread(buffer, 1, buffer_len, file);
                 cur_pos_ = 0;
             }
         }

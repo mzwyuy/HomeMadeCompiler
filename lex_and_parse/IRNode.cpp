@@ -16,10 +16,10 @@ const char *KeyWordToStr(KeyWord key_word) {
         case KW_DEREF:
             return "*";
             break;
-        case KW_INC:
+        case KW_LINC:
             return "++";
             break;
-        case KW_DEC:
+        case KW_LDEC:
             return "--";
             break;
         case KW_ADD:
@@ -95,8 +95,14 @@ void IRType::Display(std::ostream &os, unsigned lv) {
         case TShort:
             os << "short ";
             break;
+        case TUInt:
+            os << "unsigned ";
+            break;
         case TInt:
             os << "int ";
+            break;
+        case TULong:
+            os << "unsigned long ";
             break;
         case TLong:
             os << "long ";
@@ -349,39 +355,53 @@ IRExpr *ParseIR::ParseExpr() {
             // unary operator or lower priority
             if (opers.empty()) {
                 if (token->GetKeyWord() == KW_RPAREN || token->GetPriority() == 0) {
-                    // , ; or funccall(x)
+                    // , ; or funccall(x), follow set: ) or priority == 0
                     assert(exprs.size() == 1);
                     return exprs.top();
                 } else {
                     step();
-                    opers.push((TinyKeyWord *) token);
+                    opers.push((TinyKeyWord *)token);
                 }
-            } else if (is_unary) {
-                // todo: not support a++ ++ or ++a++
-                IRExpr *rval = nullptr;
-                step();
-                TinyToken *next_token = peek();
-                KeyWord op = token->GetKeyWord();
-                if (next_token && next_token->IsKeyWord()) {
-                    // not consider a++ ++ or ++a++, so it is right unary operator
-                    rval = exprs.top();
-                    exprs.pop();
-                } else {
-                    step();
-                    assert(next_token->IsId());
-                    auto id_name = next_token->GetId();
-                    rval = sym_table_->SearchVar(id_name);
-                    assert(rval);
-                }
-                exprs.push(ParseUnary(rval, op));
-            } else if (token->GetKeyWord() == KW_RPAREN ||
-                       (token->GetPriority() >= opers.top()->GetPriority()) || token->GetPriority() == 0) {
-                KeyWord op = opers.top()->GetKeyWord();
+            } else if (token->GetKeyWord() == KW_RPAREN || token->GetKeyWord() == KW_RSBRAC ||
+                       ((TinyKeyWord *) token)->IsLeftPrior(opers.top()) || token->GetPriority() == 0) {
+                TinyKeyWord* op = opers.top();
 
-                if (op == KW_LPAREN) {  // remove ()
-                    step();
+                if (op->GetKeyWord() == KW_LPAREN) {
+                    if (token->GetKeyWord() == KW_RPAREN) {  // remove ()
+                        step();
+                        opers.pop();
+                    } else if (token->GetPriority() == 0) {
+                        assert(0);
+                    } else {
+                        step();
+                        opers.push((TinyKeyWord*)token);
+                    }
+                } else if (op->GetKeyWord() == KW_LSBRAC) {
+                    if (token->GetKeyWord() == KW_LSBRAC) {  // remove [index]
+                        assert(exprs.size() >= 2);
+                        step();
+                        opers.pop();
+
+                        IRExpr *lval = nullptr, *rval = nullptr;
+
+                        rval = exprs.top();
+                        exprs.pop();
+                        lval = exprs.top();
+                        exprs.pop();
+                        exprs.push(ParseBinary(lval, rval, KW_LSBRAC));
+                    } else if (token->GetPriority() == 0) {
+                        assert(0);
+                    } else {
+                        step();
+                        opers.push((TinyKeyWord*)token);
+                    }
+                } else if (op->IsUnary()) {
+                    assert(!exprs.empty());
+                    IRExpr* rval = exprs.top();
+                    exprs.pop();
                     opers.pop();
-                } else {
+                    exprs.push(ParseUnary(rval, op->GetKeyWord()));
+                } else if (op->IsBinary()) {
                     assert(exprs.size() > 1);  // because !opers.empty()
                     IRExpr *lval = nullptr, *rval = nullptr;
 
@@ -390,7 +410,9 @@ IRExpr *ParseIR::ParseExpr() {
                     lval = exprs.top();
                     exprs.pop();
                     opers.pop();
-                    exprs.push(ParseBinary(lval, rval, op));
+                    exprs.push(ParseBinary(lval, rval, op->GetKeyWord()));
+                } else {
+                    assert(0);
                 }
             } else {
                 step();
@@ -428,9 +450,14 @@ IRExpr *ParseIR::ParseExpr() {
             }
         } else if (token->IsNum()) {
             step();
-            IRConst *number = new IRConst();
+            IRNum *number = new IRNum();
             number->val_ = token->GetNum();
             exprs.push(number);
+        } else if (token->IsChar()) {
+            step();
+            IRChar* ir_char = new IRChar();
+            ir_char->ch_ = token->GetChar();
+            exprs.push(ir_char);
         } else {
             assert(0);
             break;
@@ -443,12 +470,14 @@ IRExpr *ParseIR::ParseExpr() {
 IRType *ParseIR::ParseType() {
     IRType *new_type = new IRType();
 
-    if (peek()->GetKeyWord() == KW_CONST) {
+    TinyToken* token = peek();
+    if (token->GetKeyWord() == KW_CONST) {
         new_type->is_const_ = true;
         step();
     }
 
-    auto type_key_word = step()->GetKeyWord();
+    token = step();
+    auto type_key_word = token->GetKeyWord();
     switch (type_key_word) {
         case KW_VOID:
             new_type->base_type_ = IRType::TVoid;
@@ -460,8 +489,14 @@ IRType *ParseIR::ParseType() {
         case KW_CHAR:
             new_type->base_type_ = IRType::TChar;
             break;
+        case KW_UINT:
+            new_type->base_type_ = IRType::TUInt;
+            break;
         case KW_INT:
             new_type->base_type_ = IRType::TInt;
+            break;
+        case KW_ULONG:
+            new_type->base_type_ = IRType::TULong;
             break;
         case KW_LONG:
             new_type->base_type_ = IRType::TLong;
@@ -470,7 +505,9 @@ IRType *ParseIR::ParseType() {
             assert(0);
     }
 
-    if (peek()->GetKeyWord() == KW_ASTERISK) {
+    token = peek();
+    if (token->GetKeyWord() == KW_DEREF/* || token->GetKeyWord() == KW_MUL*/) {
+        // const * or int * etc. are parsed as deref
         new_type->is_ptr_ = true;
         step();
     }
@@ -519,12 +556,12 @@ IRVar *ParseIR::ParseLea(IRVar *var) {
 
 // built-in type tokens
 const std::unordered_set<KeyWord> type_tokens =
-        {KW_STR, KW_LONG, KW_INT, KW_CHAR, KW_BOOL, KW_VOID};
+        {KW_LONG, KW_ULONG, KW_INT, KW_UINT, KW_CHAR, KW_BOOL, KW_VOID};
 
 IRStmt *ParseIR::ParseStmt() {
     TinyToken *token = nullptr;
     token = peek();
-    // need to consider: key words used in expr all have priority, although those in type don't
+    // need to consider: keywords used in expr all have priority, although those in type don't
     if (token->IsKeyWord() && !token->GetPriority()) {
         // var/func decl stmt
         KeyWord key_word = token->GetKeyWord();
@@ -542,8 +579,9 @@ IRStmt *ParseIR::ParseStmt() {
 
             if_stmt->then_stmt_ = ParseBlock();
             token = step();
-            assert(token->GetKeyWord() == KW_ELSE);
-            if_stmt->else_stmt_ = ParseBlock();
+            if (token->GetKeyWord() == KW_ELSE) {
+                if_stmt->else_stmt_ = ParseBlock();
+            }
 
             return if_stmt;
         } else if (key_word == KW_FOR) {
@@ -590,6 +628,16 @@ IRStmt *ParseIR::ParseStmt() {
             return new IRNull();
         } else if (key_word == KW_LBRAC) {
             return ParseBlock();
+        } else if (key_word == KW_WHILE) {
+            step();
+            auto while_stmt = new IRWhile();
+            token = step();
+            assert(token->GetKeyWord() == KW_LPAREN);
+            while_stmt->condition_ = ParseExpr();
+            token = step();
+            assert(token->GetKeyWord() == KW_RPAREN);
+            while_stmt->while_body_ = ParseStmt();
+            return while_stmt;
         } else {
             /* todo: when support class, user-defined type need to consider
             */
