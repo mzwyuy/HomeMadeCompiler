@@ -18,11 +18,11 @@ enum KeyWord {
     /*used in stmt*/
     KW_IF, KW_ELSE, KW_SWITCH, KW_CASE, KW_WHILE, KW_DO, KW_FOR, KW_BREAK, KW_CONTINUE, KW_RETURN,
     /*used in unary expr*/
-    KW_NOT, KW_NEGATE, KW_LEA, KW_DEREF, KW_LINC, KW_LDEC, KW_RDEC, KW_RINC,
+    KW_NOT, KW_NEGATE, KW_POSITIVE, KW_LEA, KW_DEREF, KW_LINC, KW_LDEC, KW_RDEC, KW_RINC,
     /*used in binary expr*/
     KW_ADD, KW_SUB, KW_MUL, KW_DIV, KW_MOD,
-    KW_AND, KW_OR, KW_ASSIGN, KW_GT,
-    KW_GE, KW_LT, KW_LE, KW_EQUAL, KW_NEQUAL,
+    KW_AND, KW_OR, KW_BIT_AND, KW_ASSIGN, KW_GT,
+    KW_GE, KW_LT, KW_LE, KW_EQUAL, KW_NEQUAL, KW_SUBTRACT_EQ, KW_ADD_EQ, /*-=, +=*/
     /*generic tokens*/
     KW_COMMA/*,*/, KW_COLON/*:*/, KW_SEMICOLON/*;*/,
     KW_LPAREN, KW_RPAREN/*()*/,
@@ -68,11 +68,15 @@ public:
 
     virtual bool IsChar() { return false; }
 
+    virtual bool IsStr() { return false; }
+
     virtual bool IsNum() { return false; }
 
     virtual long GetNum() { return 0; }
 
     virtual char GetChar() {return 0; }
+
+    virtual string GetStr() {return string(""); }
 
     virtual unsigned GetPriority() { return 0; }
 
@@ -80,11 +84,12 @@ public:
 
     virtual bool IsBinary() { return false; }
 
-private:
-    static std::unordered_map<string, KeyWord> token_to_keyword_;
-    static std::unordered_set<char> single_char_keyword_;
-};
+    static const std::unordered_map<KeyWord, KeyWord> ambiguous_keyword_;
 
+private:
+    static const std::unordered_map<string, KeyWord> token_to_keyword_;
+    static const std::unordered_set<char> single_char_keyword_;
+};
 
 class TinyId : public TinyToken {
 public:
@@ -113,16 +118,24 @@ public:
 
     KeyWord GetKeyWord() { return key_word_; }
 
+    void SetKeyWord(KeyWord key_word) {
+        key_word_ = key_word;
+    }
+
     unsigned GetPriority() override {
         switch (key_word_) {
                 // =
             case KW_ASSIGN:
-                return 10;
+            case KW_SUBTRACT_EQ:
+            case KW_ADD_EQ:
+                return 11;
                 // ||
             case KW_OR:
-                return 9;
+                return 10;
                 // &&
             case KW_AND:
+                return 9;
+            case KW_BIT_AND:
                 return 8;
                 // > < >= <= == !=
             case KW_GT:
@@ -157,8 +170,8 @@ public:
             case KW_RPAREN:
                 return 2;
                 // []
-            case KW_LBRAC:
-            case KW_RBRAC:
+            case KW_LSBRAC:
+            case KW_RSBRAC:
                 return 1;
             default:
                 return 0;
@@ -172,7 +185,7 @@ public:
         assert(left_priority && right_priority);
 
         if (left_priority == right_priority) {  // left associative
-            return left_priority != 10 && left_priority != 4;
+            return left_priority != 11 && left_priority != 4;
         } else {
             return left_priority < right_priority;
         }
@@ -193,7 +206,21 @@ private:
     KeyWord key_word_;
 };
 
-using TinyStr = TinyId;
+class TinyStr : public TinyToken {
+public:
+    TinyStr(const string &str) : str_(str) {}
+
+    TinyStr(string &&str) : str_(std::move(str)) {}  // also can be {} here
+
+    string ToString() { return str_; }
+
+    bool IsStr() { return true; }
+
+    string GetStr() { return str_; }
+
+private:
+    string str_;
+};
 
 class TinyChar : public TinyToken {
 public:
@@ -328,23 +355,21 @@ public:
             } else if (TinyToken::IsSingleKeyWord(ch)) {
                 // some keywords don't need space to separate
                 char next_ch = buffer_read_.AdvanceAndGetChar();
-                bool is_last_token_operand = false;
-                if (!tokens_.empty()) {
-                    auto last_token = tokens_.back();
-                    // (...) or arr[idx] is operand, others can only be operators!
-                    is_last_token_operand = last_token->IsId() || (last_token->GetKeyWord() == KW_RPAREN ||
-                                                                   last_token->GetKeyWord() == KW_RSBRAC);
-                }
                 str.push_back(ch);
                 if ((ch == '>' && next_ch == '=') || (ch == '<' && next_ch == '=') || (ch == '&' && next_ch == '&') ||
-                    (ch == '|' && next_ch == '|') || (ch == '=' && next_ch == '=') || (ch == '!' && next_ch == '=')) {
-                    // ++, -- && || >= <= ==
+                    (ch == '|' && next_ch == '|') || (ch == '=' && next_ch == '=') || (ch == '!' && next_ch == '=') ||
+                    (ch == '-' && next_ch == '=') || (ch == '+' && next_ch == '=')) {
+                    // ++, -- && || >= <= == -= +=
                     str.push_back(next_ch);
                     ch = buffer_read_.AdvanceAndGetChar();
-                } else if (ch == '+' && next_ch == '+' && !is_last_token_operand) {
+                } else if (ch == '+' && next_ch == '+') {  // ambiguity: KW_RINC or KW_LINC?
                     tokens_.push_back(new TinyKeyWord(KW_RINC));
-                } else if (ch == '-' && next_ch == '-' && !is_last_token_operand) {
+                    ch = buffer_read_.AdvanceAndGetChar();
+                    continue;
+                } else if (ch == '-' && next_ch == '-') {
                     tokens_.push_back(new TinyKeyWord(KW_RDEC));
+                    ch = buffer_read_.AdvanceAndGetChar();
+                    continue;
                 } else if (ch == '/' && next_ch == '*') {
                     // todo: need to add IRComment node
                     ch = buffer_read_.AdvanceAndGetChar();
@@ -355,17 +380,19 @@ public:
                     }
                     ch = buffer_read_.AdvanceAndGetChar();
                     continue;
-                } else if (ch == '+' && !is_last_token_operand) {
-                    // skip '+'
-                } else if (ch == '-' && !is_last_token_operand) {
-                    tokens_.push_back(new TinyKeyWord(KW_NEGATE));
+                } else if (ch == '+') {
+                    tokens_.push_back(new TinyKeyWord(KW_ADD));
                     continue;
-                } else if (ch == '*' && !is_last_token_operand) {
-                    tokens_.push_back(new TinyKeyWord(KW_DEREF));
+                } else if (ch == '-') {
+                    tokens_.push_back(new TinyKeyWord(KW_SUB));
                     continue;
-                } else if (ch == '&' && !is_last_token_operand) {
+                } else if (ch == '*') {
+                    tokens_.push_back(new TinyKeyWord(KW_MUL));
+                    continue;
+                } else if (ch == '&') {
                     // todo: otherwise bit and, need to support bitwise operators
-                    tokens_.push_back(new TinyKeyWord(KW_LEA));
+                    tokens_.push_back(new TinyKeyWord(KW_BIT_AND));
+                    continue;
                 } else {
                     // ( ) { } [ ] ...
                 }

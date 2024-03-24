@@ -6,70 +6,74 @@ const char *KeyWordToStr(KeyWord key_word) {
     switch (key_word) {
         case KW_NOT:
             return "!";
-            break;
         case KW_NEGATE:
             return "-";
-            break;
+        case KW_POSITIVE:
+            return "+";
         case KW_LEA:
             return "&";
-            break;
         case KW_DEREF:
             return "*";
-            break;
         case KW_LINC:
             return "++";
-            break;
         case KW_LDEC:
             return "--";
-            break;
-        case KW_ADD:
-            return "+";
-            break;
-        case KW_SUB:
-            return "-";
-            break;
-        case KW_MUL:
-            return "*";
-            break;
-        case KW_DIV:
-            return "/";
-            break;
-        case KW_MOD:
-            return "%";
-            break;
         case KW_RDEC:
             return "--";
-            break;
         case KW_RINC:
             return "++";
-            break;
-        case KW_AND:
+        case KW_ADD:
             return "+";
-            break;
+        case KW_SUB:
+            return "-";
+        case KW_MUL:
+            return "*";
+        case KW_DIV:
+            return "/";
+        case KW_MOD:
+            return "%";
+        case KW_AND:
+            return "&&";
         case KW_OR:
             return "||";
-            break;
+        case KW_BIT_AND:
+            return "&";
         case KW_ASSIGN:
             return "=";
-            break;
         case KW_GT:
             return ">";
-            break;
         case KW_GE:
             return ">=";
-            break;
         case KW_LT:
             return "<";
-            break;
         case KW_LE:
             return "<=";
-            break;
         case KW_EQUAL:
             return "==";
-            break;
         case KW_NEQUAL:
             return "!=";
-            break;
+        case KW_SUBTRACT_EQ:
+            return "-=";
+        case KW_ADD_EQ:
+            return "+=";
+        case KW_COMMA:
+            return ",";
+        case KW_COLON:
+            return ":";
+        case KW_SEMICOLON:
+            return ";";
+        case KW_LPAREN:
+            return "(";
+        case KW_RPAREN:
+            return ")";
+        case KW_LBRAC:
+            return "{";
+        case KW_RBRAC:
+            return "}";
+        case KW_LSBRAC:
+            return "[";
+        case KW_RSBRAC:
+            return "]";
         default:
             assert(0);
     }
@@ -122,28 +126,54 @@ void IRFuncCall::Display(std::ostream &os, unsigned lv) {
     assert(func_);
     std::string spaces(lv, ' ');
     os << spaces << func_->name_ << "(";
-    for (auto i: args_) {
-        i->Display(os, 0);
+    unsigned size = args_.size();
+    for (unsigned i = 0; i < size; i++) {
+        args_[i]->Display(os, 0);
+        if (i != size - 1) {
+            os << ", ";
+        }
     }
     os << ") ";
 }
 
-void IRVarDecl::Display(std::ostream &os, unsigned lv) {
+void IRSysFuncCall::Display(std::ostream &os, unsigned int lv) {
+    std::string spaces(lv, ' ');
+    os << spaces;
+    if (key_word_ == KW_PRINTF) {
+        os << "printf(";
+    } else {
+        assert(0);
+    }
+    unsigned size = args_.size();
+    for (unsigned i = 0; i < size; i++) {
+        args_[i]->Display(os, 0);
+        if (i != size - 1) {
+            os << ", ";
+        }
+    }
+    os << ") ";
+}
+
+void IRVarDecl::Display(std::ostream &os, unsigned lv, bool new_line) {
     assert(!vars_.empty());
+    if (new_line) {
+        os << "\n";
+    }
     vars_.front()->type_->Display(os, lv);
     unsigned cnt = vars_.size();
     for (unsigned i = 0; i < cnt; i++) {
         auto var = vars_[i];
         assert(var);
-        os << " " << var->name_ << " = ";
+        os << " " << var->name_;
         if (var->initial_val_) {
+            os  << " = ";
             var->initial_val_->Display(os, 0);
         }
         if (i + 1 != cnt) {
             os << ", ";
         }
     }
-    os << ";\n";
+    os << ";";
 }
 
 void IRFunc::Display(std::ostream &os, unsigned lv) {
@@ -160,7 +190,7 @@ void IRFunc::Display(std::ostream &os, unsigned lv) {
             os << ", ";
         }
     }
-    os << ") {\n";
+    os << ") {";
     // not use IRCodeBlock::Display(os, lv); because of display format
 
     for (auto i: stmts_) {
@@ -344,40 +374,57 @@ IRExpr *ParseIR::ParseBinary(IRExpr *left, IRExpr *right, KeyWord op) {
     return binary;
 }
 
+// ++, --, *, &, +, - are ambiguous according to the last token is operand or operator
+void ChangeAmbiguity(TinyKeyWord* token) {
+    KeyWord key_word = token->GetKeyWord();
+    auto it = TinyToken::ambiguous_keyword_.find(key_word);
+    if (it != TinyToken::ambiguous_keyword_.end()) {
+        ((TinyKeyWord*)token)->SetKeyWord(it->second);
+    }
+}
+
 IRExpr *ParseIR::ParseExpr() {
     std::stack<TinyKeyWord *> opers;
     std::stack<IRExpr *> exprs;
     TinyToken *token = nullptr;
+    bool is_operand = false;  // while (*end != '\0') ++end;
     while (true) {
         token = peek();
         if (token->IsKeyWord()) {
-            bool is_unary = token->IsUnary();
-            // unary operator or lower priority
+            if (!is_operand) {
+                ChangeAmbiguity((TinyKeyWord*)token);
+            }
             if (opers.empty()) {
                 if (token->GetKeyWord() == KW_RPAREN || token->GetPriority() == 0) {
                     // , ; or funccall(x), follow set: ) or priority == 0
-                    assert(exprs.size() == 1);
-                    return exprs.top();
+                    if (exprs.empty()) {  // directly parse , ; or )
+                        return nullptr;
+                    } else {
+                        assert(exprs.size() == 1);
+                        return exprs.top();
+                    }
                 } else {
                     step();
                     opers.push((TinyKeyWord *)token);
                 }
             } else if (token->GetKeyWord() == KW_RPAREN || token->GetKeyWord() == KW_RSBRAC ||
-                       ((TinyKeyWord *) token)->IsLeftPrior(opers.top()) || token->GetPriority() == 0) {
+                       token->GetPriority() == 0 || opers.top()->IsLeftPrior((TinyKeyWord *) token)) {
                 TinyKeyWord* op = opers.top();
 
                 if (op->GetKeyWord() == KW_LPAREN) {
                     if (token->GetKeyWord() == KW_RPAREN) {  // remove ()
                         step();
                         opers.pop();
+                        is_operand = true;
                     } else if (token->GetPriority() == 0) {
                         assert(0);
-                    } else {
+                    } else {  // (*a++), although ( is < *, still push * in stack
                         step();
                         opers.push((TinyKeyWord*)token);
+                        is_operand = false;
                     }
                 } else if (op->GetKeyWord() == KW_LSBRAC) {
-                    if (token->GetKeyWord() == KW_LSBRAC) {  // remove [index]
+                    if (token->GetKeyWord() == KW_RSBRAC) {  // remove [index]
                         assert(exprs.size() >= 2);
                         step();
                         opers.pop();
@@ -389,11 +436,13 @@ IRExpr *ParseIR::ParseExpr() {
                         lval = exprs.top();
                         exprs.pop();
                         exprs.push(ParseBinary(lval, rval, KW_LSBRAC));
+                        is_operand = true;
                     } else if (token->GetPriority() == 0) {
                         assert(0);
-                    } else {
+                    } else {  // [*a++], although [ is < *, still push * in stack
                         step();
                         opers.push((TinyKeyWord*)token);
+                        is_operand = false;
                     }
                 } else if (op->IsUnary()) {
                     assert(!exprs.empty());
@@ -401,6 +450,7 @@ IRExpr *ParseIR::ParseExpr() {
                     exprs.pop();
                     opers.pop();
                     exprs.push(ParseUnary(rval, op->GetKeyWord()));
+                    is_operand = true;
                 } else if (op->IsBinary()) {
                     assert(exprs.size() > 1);  // because !opers.empty()
                     IRExpr *lval = nullptr, *rval = nullptr;
@@ -411,12 +461,14 @@ IRExpr *ParseIR::ParseExpr() {
                     exprs.pop();
                     opers.pop();
                     exprs.push(ParseBinary(lval, rval, op->GetKeyWord()));
+                    is_operand = true;
                 } else {
                     assert(0);
                 }
             } else {
                 step();
                 opers.push((TinyKeyWord *) token);
+                is_operand = false;
             }
         } else if (token->IsId()) {
             step();
@@ -425,10 +477,12 @@ IRExpr *ParseIR::ParseExpr() {
 
             // todo: lack detection of ' ', like: func (arg0, arg1...)
             token = peek();
-            if (token->GetKeyWord() == KW_LPAREN) {
+            auto sys_func_kw = IRSysFuncCall::GetSysFuncKW(id_name);
+            if (token->GetKeyWord() == KW_LPAREN && (sys_func_kw == IRSysFuncCall::KW_NONE)) {
                 // todo: now don't support default value as func/task call's arg cause lack of copy method
                 step();
                 IRFunc *func = sym_table_->SearchFunc(id_name);
+                assert(func);
                 IRFuncCall *func_call = new IRFuncCall();
                 func_call->func_ = func;
 
@@ -443,21 +497,50 @@ IRExpr *ParseIR::ParseExpr() {
                 token = step();
                 assert(token->GetKeyWord() == KW_RPAREN);
                 exprs.push(func_call);
+            } else if (sys_func_kw != IRSysFuncCall::KW_NONE) {
+                // todo: now don't support default value as func/task call's arg cause lack of copy method
+                step();
+                assert(token->GetKeyWord() == KW_LPAREN);
+                IRSysFuncCall* sys_func_call = new IRSysFuncCall();
+                sys_func_call->key_word_ = sys_func_kw;
+
+                IRExpr* arg = nullptr;
+                while ((arg = ParseExpr())) {
+                    sys_func_call->args_.push_back(arg);
+
+                    token = peek();
+                    if (token->GetKeyWord() == KW_COMMA) {
+                        token = step();
+                    }
+                }
+
+                token = step();
+                assert(token->GetKeyWord() == KW_RPAREN);
+                exprs.push(sys_func_call);
             } else {
                 IRVar *var = sym_table_->SearchVar(id_name);
                 assert(var);
                 exprs.push(var);
             }
+            is_operand = true;
         } else if (token->IsNum()) {
             step();
             IRNum *number = new IRNum();
             number->val_ = token->GetNum();
             exprs.push(number);
+            is_operand = true;
         } else if (token->IsChar()) {
             step();
             IRChar* ir_char = new IRChar();
             ir_char->ch_ = token->GetChar();
             exprs.push(ir_char);
+            is_operand = true;
+        } else if (token->IsStr()) {
+            step();
+            IRStr* ir_str = new IRStr();
+            ir_str->str_ = token->GetStr();
+            exprs.push(ir_str);
+            is_operand = true;
         } else {
             assert(0);
             break;
@@ -506,7 +589,7 @@ IRType *ParseIR::ParseType() {
     }
 
     token = peek();
-    if (token->GetKeyWord() == KW_DEREF/* || token->GetKeyWord() == KW_MUL*/) {
+    if (token->GetKeyWord() == KW_DEREF || token->GetKeyWord() == KW_MUL) {
         // const * or int * etc. are parsed as deref
         new_type->is_ptr_ = true;
         step();
@@ -578,8 +661,9 @@ IRStmt *ParseIR::ParseStmt() {
             assert(token->GetKeyWord() == KW_RPAREN);
 
             if_stmt->then_stmt_ = ParseBlock();
-            token = step();
+            token = peek();
             if (token->GetKeyWord() == KW_ELSE) {
+                token = step();
                 if_stmt->else_stmt_ = ParseBlock();
             }
 
@@ -646,6 +730,8 @@ IRStmt *ParseIR::ParseStmt() {
     } else {
         auto expr_stmt = new IRExprStmt();
         expr_stmt->expr_ = ParseExpr();
+        token = step();
+        assert(token->GetKeyWord() == KW_SEMICOLON);
         return expr_stmt;
     }
 }

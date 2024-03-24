@@ -61,7 +61,10 @@ class IRFunc;
 
 class IRStmt {
 public:
-    virtual void Display(std::ostream &os, unsigned lv = 0) {
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
+        if (new_line) {
+            os << "\n";
+        }
         os << "empty stmt" << std::endl;
     }
 };
@@ -162,20 +165,21 @@ public:
     OPERATOR_NEW
 
     virtual void Display(std::ostream& os, unsigned lv = 0) {
-        os << "\"" << ch_ << "\"";
+        os << "\'" << ch_ << "\'";
     }
     char ch_ = 0;
 };
 
 class IRStr : public IRConst {
 public:
-    ~IRStr() {
-        if (str_) free(str_);
+    ~IRStr() {// if (str_) free(str_);
     }
     OPERATOR_NEW
 
-    virtual void Display(std::ostream& os, unsigned lv = 0) {}
-    char* str_ = nullptr;
+    virtual void Display(std::ostream& os, unsigned lv = 0) {
+        os << "\"" << str_ << "\"";
+    }
+    string str_;
 };
 
 class IRVar : public IRExpr {
@@ -225,6 +229,9 @@ public:
         lval_->Display(os, lv);
         os << " " << KeyWordToStr(op_) << " ";
         rval_->Display(os, lv);
+        if (op_ == KW_LSBRAC) {
+            os << " " << KeyWordToStr(KW_RSBRAC);
+        }
     }
 
     KeyWord op_ = KW_NONE;
@@ -239,6 +246,25 @@ public:
     virtual void Display(std::ostream &os, unsigned lv = 0);
 
     IRFunc *func_ = nullptr;
+    std::vector<IRExpr *> args_;
+};
+
+class IRSysFuncCall : public IRExpr {
+public:
+    OPERATOR_NEW
+    virtual void Display(std::ostream &os, unsigned lv = 0);
+    enum SysFuncKW {
+        KW_NONE = 0,
+        KW_PRINTF = 1,
+    };
+    static SysFuncKW GetSysFuncKW(const string& id) {
+        if (id == "printf") {
+            return KW_PRINTF;
+        } else {
+            return KW_NONE;
+        }
+    }
+    SysFuncKW key_word_ = KW_NONE;
     std::vector<IRExpr *> args_;
 };
 
@@ -342,16 +368,18 @@ public:
 
     bool IsGlobal() { return is_global_; }
 
-    virtual void Display(std::ostream &os, unsigned lv = 0) {
-        std::string spaces(lv, ' ');
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = false) {
+
         if (!is_global_) {
-            os << spaces << "{" << std::endl;
+            os << " {";
         }
         for (auto i: stmts_) {
-            i->Display(os, is_global_ ? 0 : lv + 4);
+            i->Display(os, is_global_ ? 0 : lv);
         }
         if (!is_global_) {
-            os << spaces << "}" << std::endl;
+            assert(lv >= 4);
+            std::string spaces(lv - 4, ' ');
+            os << "\n" << spaces << "}";
         }
     }
 
@@ -374,7 +402,6 @@ public:
     IRType *ret_type_ = nullptr;
     std::vector<IRVar *> params_;
 };
-
 
 class SymTable {
 public:
@@ -435,7 +462,7 @@ class IRVarDecl : public IRStmt {
 public:
     OPERATOR_NEW
 
-    virtual void Display(std::ostream &os, unsigned lv = 0);
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true);
 
     std::vector<IRVar *> vars_;
 };
@@ -444,7 +471,7 @@ class IRFuncDecl : public IRStmt {
 public:
     OPERATOR_NEW
 
-    virtual void Display(std::ostream &os, unsigned lv = 0) {
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
         func_->Display(os, lv);
     }
 
@@ -463,7 +490,10 @@ class IRExprStmt : public IRStmt {
 public:
     OPERATOR_NEW
 
-    virtual void Display(std::ostream &os, unsigned lv = 0) {
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
+        if (new_line) {
+            os << "\n";
+        }
         std::string spaces(lv, ' ');
         os << spaces;
         expr_->Display(os, 0);
@@ -477,14 +507,19 @@ class IRIfElse : public IRStmt {
 public:
     OPERATOR_NEW
 
-    virtual void Display(std::ostream &os, unsigned lv = 0) {
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
+        if (new_line) {
+            os << "\n";
+        }
         std::string spaces(lv, ' ');
         os << spaces << "if (";
         condition_->Display(os, 0);
-        os << ") ";
+        os << ")";
         then_stmt_->Display(os, lv + 4);
-        os << "then ";
-        else_stmt_->Display(os, lv + 4);
+        if (else_stmt_) {
+            os << "\n" << spaces << "else";
+            else_stmt_->Display(os, lv + 4);
+        }
     }
 
     IRExpr *condition_ = nullptr;
@@ -497,16 +532,19 @@ class IRFor : public IRStmt {
 public:
     OPERATOR_NEW
 
-    virtual void Display(std::ostream &os, unsigned lv = 0) {
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
+        if (new_line) {
+            os << "\n";
+        }
         std::string spaces(lv, ' ');
         os << spaces << "for (";
-        init_->Display(os, 0);
-        os << "; ";
+        init_->Display(os, 0, false);
+        os << " ";
         condition_->Display(os, 0);
         os << "; ";
-        iteration_->Display(os, 0);
+        iteration_->Display(os, 0, false);
         os << ") ";
-        for_body_->Display(os, lv);
+        for_body_->Display(os, lv + 4);
     }
 
     IRStmt *init_ = nullptr;
@@ -519,12 +557,15 @@ class IRWhile : public IRStmt {
 public:
     OPERATOR_NEW
 
-    virtual void Display(std::ostream &os, unsigned lv = 0) {
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
+        if (new_line) {
+            os << "\n";
+        }
         std::string spaces(lv, ' ');
         os << spaces << "while (";
         condition_->Display(os, 0);
         os << ")";
-        while_body_->Display(os, lv);
+        while_body_->Display(os, lv + 4);
     }
     IRExpr *condition_ = nullptr;
     IRStmt* while_body_ = nullptr;
@@ -533,7 +574,10 @@ public:
 // jump stmts
 class IRBreak : public IRStmt {
 public:
-    virtual void Display(std::ostream &os, unsigned lv = 0) {
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
+        if (new_line) {
+            os << "\n";
+        }
         std::string spaces(lv, ' ');
         os << spaces << "break;";
     }
@@ -545,7 +589,10 @@ class IRContinue : public IRStmt {
 public:
     OPERATOR_NEW
 
-    virtual void Display(std::ostream &os, unsigned lv = 0) {
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
+        if (new_line) {
+            os << "\n";
+        }
         std::string spaces(lv, ' ');
         os << spaces << "continue;";
     }
@@ -555,7 +602,10 @@ class IRReturn : public IRStmt {
 public:
     OPERATOR_NEW
 
-    virtual void Display(std::ostream &os, unsigned lv = 0) {
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
+        if (new_line) {
+            os << "\n";
+        }
         std::string spaces(lv, ' ');
         os << spaces << "return ";
         if (ret_val_) {
@@ -571,7 +621,10 @@ class IRNull : public IRStmt {
 public:
     OPERATOR_NEW
 
-    virtual void Display(std::ostream &os, unsigned lv = 0) {
+    virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
+        if (new_line) {
+            os << "\n";
+        }
         std::string spaces(lv, ' ');
         os << spaces << ";";
     }
