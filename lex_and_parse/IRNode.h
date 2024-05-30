@@ -12,6 +12,14 @@
 #define SIMERROR(message) std::cout << message
 #define ALIGN_VAL 8
 
+enum IRClassType : unsigned {
+    IR_Stmt, IR_CodeBlock, IR_Func, IR_VarDecl, IR_FuncDecl, IR_ExprStmt, IR_IfElse, IR_For,
+    IR_While, IR_Break, IR_Continue, IR_Return, IR_Null,
+
+    IR_Expr, IR_Const, IR_Num, IR_Char, IR_Str, IR_Var, IR_Temp, IR_Reg, IR_Unary,
+    IR_Binary, IR_FuncCall, IR_SysFuncCall
+};
+
 /* todo:
 1. var initial val
 2. var len, offset
@@ -67,6 +75,7 @@ public:
         }
         os << "empty stmt" << std::endl;
     }
+    virtual IRClassType ClassId() {return IR_Stmt;}
 };
 
 /* expr-------------------------------------------------------------
@@ -138,6 +147,7 @@ public:
     virtual void Display(std::ostream &os, unsigned lv = 0) {
         os << "empty expr" << std::endl;
     }
+    IRClassType ClassId() {return IR_Expr;}
 };
 
 class IRConst : public IRExpr {
@@ -146,6 +156,7 @@ public:
 
     bool IsConst() override {return true;}
     virtual void Display(std::ostream &os, unsigned lv = 0) = 0;
+    IRClassType ClassId() {return IR_Const;}
 };
 
 class IRNum : public IRConst {
@@ -155,9 +166,10 @@ public:
     virtual void Display(std::ostream &os, unsigned lv = 0) {
         os << val_;
     }
+    IRClassType ClassId() {return IR_Num;}
 
     IRType::type_enum type_ = IRType::TLong;
-    long val_ = 0;
+    uint64_t val_ = 0;
 };
 
 class IRChar : public IRConst {
@@ -167,6 +179,7 @@ public:
     virtual void Display(std::ostream& os, unsigned lv = 0) {
         os << "\'" << ch_ << "\'";
     }
+    IRClassType ClassId() {return IR_Char;}
     char ch_ = 0;
 };
 
@@ -179,6 +192,7 @@ public:
     virtual void Display(std::ostream& os, unsigned lv = 0) {
         os << "\"" << str_ << "\"";
     }
+    IRClassType ClassId() {return IR_Str;}
     string str_;
 };
 
@@ -194,6 +208,7 @@ public:
         // type_->Display(os, 0);
         os << name_;
     }
+    IRClassType ClassId() {return IR_Var;}
 
     bool is_externed_ = false;
     bool is_left_ = true;
@@ -204,11 +219,29 @@ public:
     std::string name_;
 };
 
+// only used to record temp results
+class IRTemp : public IRExpr {
+public:
+    OPERATOR_NEW
+    IRClassType ClassId() {return IR_Temp;}
+    unsigned num_ = 0;
+    IRType* type = nullptr;
+};
+
+// used to appoint register
+class IRReg : public IRExpr {
+public:
+    OPERATOR_NEW
+    IRClassType ClassId() {return IR_Reg;}
+    enum {rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14, r15} reg_;
+};
+
 class IRUnary : public IRExpr {
 public:
     IRUnary(IRExpr *rval, KeyWord op) : op_(op), rval_(rval) {}
 
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_Unary;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0) {
         os << KeyWordToStr(op_);
@@ -224,6 +257,7 @@ public:
     IRBinary(IRExpr *lval, IRExpr *rval, KeyWord op) : op_(op), lval_(lval), rval_(rval) {}
 
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_Binary;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0) {
         lval_->Display(os, lv);
@@ -242,6 +276,7 @@ public:
 class IRFuncCall : public IRExpr {
 public:
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_FuncCall;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0);
 
@@ -252,6 +287,7 @@ public:
 class IRSysFuncCall : public IRExpr {
 public:
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_SysFuncCall;}
     virtual void Display(std::ostream &os, unsigned lv = 0);
     enum SysFuncKW {
         KW_NONE = 0,
@@ -363,6 +399,7 @@ public:
     IRCodeBlock(std::string &&name) : IRScope(std::move(name)) {}
 
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_CodeBlock;}
 
     bool IsCodeBlock() override { return true; }
 
@@ -394,6 +431,7 @@ public:
     IRFunc(std::string &&name) : IRCodeBlock(std::move(name)) {}
 
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_Func;}
 
     bool IsFunc() override { return true; }
 
@@ -461,6 +499,7 @@ private:
 class IRVarDecl : public IRStmt {
 public:
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_VarDecl;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true);
 
@@ -470,6 +509,7 @@ public:
 class IRFuncDecl : public IRStmt {
 public:
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_FuncDecl;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
         func_->Display(os, lv);
@@ -489,6 +529,7 @@ public:
 class IRExprStmt : public IRStmt {
 public:
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_ExprStmt;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
         if (new_line) {
@@ -506,6 +547,7 @@ public:
 class IRIfElse : public IRStmt {
 public:
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_IfElse;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
         if (new_line) {
@@ -531,6 +573,7 @@ public:
 class IRFor : public IRStmt {
 public:
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_For;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
         if (new_line) {
@@ -556,6 +599,7 @@ public:
 class IRWhile : public IRStmt {
 public:
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_While;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
         if (new_line) {
@@ -583,11 +627,13 @@ public:
     }
 
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_Break;}
 };
 
 class IRContinue : public IRStmt {
 public:
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_Continue;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
         if (new_line) {
@@ -601,6 +647,7 @@ public:
 class IRReturn : public IRStmt {
 public:
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_Return;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
         if (new_line) {
@@ -620,6 +667,7 @@ public:
 class IRNull : public IRStmt {
 public:
     OPERATOR_NEW
+    IRClassType ClassId() {return IR_Null;}
 
     virtual void Display(std::ostream &os, unsigned lv = 0, bool new_line = true) {
         if (new_line) {

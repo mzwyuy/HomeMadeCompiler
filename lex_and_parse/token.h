@@ -6,6 +6,7 @@
 #include <iostream>
 #include <list>
 #include <vector>
+#include <cstdint>
 #include "buffer_read.h"
 
 using std::string;
@@ -22,7 +23,7 @@ enum KeyWord {
     /*used in binary expr*/
     KW_ADD, KW_SUB, KW_MUL, KW_DIV, KW_MOD,
     KW_AND, KW_OR, KW_BIT_AND, KW_ASSIGN, KW_GT,
-    KW_GE, KW_LT, KW_LE, KW_EQUAL, KW_NEQUAL, KW_SUBTRACT_EQ, KW_ADD_EQ, /*-=, +=*/
+    KW_GE, KW_LT, KW_LE, KW_EQUAL, KW_NEQUAL, KW_SUBTRACT_EQ, KW_ADD_EQ, KW_DIV_EQ,/*-=, +=*/
     /*generic tokens*/
     KW_COMMA/*,*/, KW_COLON/*:*/, KW_SEMICOLON/*;*/,
     KW_LPAREN, KW_RPAREN/*()*/,
@@ -72,7 +73,7 @@ public:
 
     virtual bool IsNum() { return false; }
 
-    virtual long GetNum() { return 0; }
+    virtual uint64_t GetNum() { return 0; }
 
     virtual char GetChar() {return 0; }
 
@@ -124,10 +125,11 @@ public:
 
     unsigned GetPriority() override {
         switch (key_word_) {
-                // =
+                // =  -=  +=  /=
             case KW_ASSIGN:
             case KW_SUBTRACT_EQ:
             case KW_ADD_EQ:
+            case KW_DIV_EQ:
                 return 11;
                 // ||
             case KW_OR:
@@ -238,16 +240,16 @@ private:
 
 class TinyNum : public TinyToken {
 public:
-    TinyNum(long num) : num_(num) {}
+    TinyNum(uint64_t num) : num_(num) {}
 
     string ToString() { return std::to_string(num_); }
 
     bool IsNum() { return true; }
 
-    long GetNum() { return num_; }
+    uint64_t GetNum() { return num_; }
 
 private:
-    long num_;
+    uint64_t num_;
 };
 
 class LexemeInterpreter {
@@ -279,7 +281,7 @@ public:
                 }
             } else if (IsNum(ch)) {
                 // todo: 0x, 0b, 0o,   RaiseError("Invalid num.");
-                long num = 0;
+                uint64_t num = 0;
                 while (IsNum(ch)) {
                     num = num * 10 + ch - '0';
                     ch = buffer_read_.AdvanceAndGetChar();
@@ -358,7 +360,7 @@ public:
                 str.push_back(ch);
                 if ((ch == '>' && next_ch == '=') || (ch == '<' && next_ch == '=') || (ch == '&' && next_ch == '&') ||
                     (ch == '|' && next_ch == '|') || (ch == '=' && next_ch == '=') || (ch == '!' && next_ch == '=') ||
-                    (ch == '-' && next_ch == '=') || (ch == '+' && next_ch == '=')) {
+                    (ch == '-' && next_ch == '=') || (ch == '+' && next_ch == '=') || (ch == '/' && next_ch == '=')) {
                     // ++, -- && || >= <= == -= +=
                     str.push_back(next_ch);
                     ch = buffer_read_.AdvanceAndGetChar();

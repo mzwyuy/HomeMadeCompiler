@@ -19,8 +19,10 @@ include_directories(${CMAKE_SOURCE_DIR}/3rd_lib/googletest-main/googletest/inclu
 
 add_subdirectory(lex_and_parse)
 add_subdirectory(test_cases)
+add_subdirectory(code_gen)
 
-add_executable(tiny_compiler main.cpp)
+add_executable(tiny_compiler main.cpp
+        code_gen/QuadCodeGen.cpp)
 target_include_directories(tiny_compiler PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ./lex_and_parse ./test_cases)
 target_link_libraries(tiny_compiler PUBLIC stdc++)
 target_link_libraries(tiny_compiler PUBLIC gtest gtest_main lex_and_parse)

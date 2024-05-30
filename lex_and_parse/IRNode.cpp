@@ -56,6 +56,8 @@ const char *KeyWordToStr(KeyWord key_word) {
             return "-=";
         case KW_ADD_EQ:
             return "+=";
+        case KW_DIV_EQ:
+            return "/=";
         case KW_COMMA:
             return ",";
         case KW_COLON:
@@ -178,7 +180,7 @@ void IRVarDecl::Display(std::ostream &os, unsigned lv, bool new_line) {
 
 void IRFunc::Display(std::ostream &os, unsigned lv) {
     std::string spaces(lv, ' ');
-    os << spaces;
+    os << "\n" << spaces;
     ret_type_->Display(os, 0);  // type has ' ' at the back
     os << name_ << "(";
     unsigned cnt = params_.size();
