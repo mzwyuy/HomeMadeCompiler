@@ -147,7 +147,7 @@ public:
     virtual void Display(std::ostream &os, unsigned lv = 0) {
         os << "empty expr" << std::endl;
     }
-    IRClassType ClassId() {return IR_Expr;}
+    virtual IRClassType ClassId() {return IR_Expr;}
 };
 
 class IRConst : public IRExpr {
@@ -196,7 +196,16 @@ public:
     string str_;
 };
 
-class IRVar : public IRExpr {
+// only used to record temp results
+class IRTemp : public IRExpr {
+public:
+    OPERATOR_NEW
+    IRClassType ClassId() {return IR_Temp;}
+    unsigned num_ = 0;
+    IRType* type_ = nullptr;
+};
+
+class IRVar : public IRTemp {
 public:
     IRVar(const std::string &name) : name_(name) {}
 
@@ -213,27 +222,78 @@ public:
     bool is_externed_ = false;
     bool is_left_ = true;
     int offset_ = 0;
-    IRType *type_ = nullptr;
     IRExpr *initial_val_ = nullptr;
     IRScope *scope_ = nullptr;  // need?
     std::string name_;
 };
 
-// only used to record temp results
-class IRTemp : public IRExpr {
-public:
-    OPERATOR_NEW
-    IRClassType ClassId() {return IR_Temp;}
-    unsigned num_ = 0;
-    IRType* type = nullptr;
-};
-
 // used to appoint register
-class IRReg : public IRExpr {
+class IRReg : public IRTemp {
+public:
+    enum reg_type {rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14, r15};
+private:
+    IRReg(reg_type reg_id) : reg_(reg_id) {
+        type_ = nullptr;
+    }
 public:
     OPERATOR_NEW
     IRClassType ClassId() {return IR_Reg;}
-    enum {rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14, r15} reg_;
+    static IRReg* GetReg(reg_type reg_id) {
+        static IRReg ir_rax(rax);
+        static IRReg ir_rbx(rbx);
+        static IRReg ir_rcx(rcx);
+        static IRReg ir_rdx(rdx);
+        static IRReg ir_rsi(rsi);
+        static IRReg ir_rdi(rdi);
+        static IRReg ir_rbp(rbp);
+        static IRReg ir_rsp(rsp);
+        static IRReg ir_r8(r8);
+        static IRReg ir_r9(r9);
+        static IRReg ir_r10(r10);
+        static IRReg ir_r11(r11);
+        static IRReg ir_r12(r12);
+        static IRReg ir_r13(r13);
+        static IRReg ir_r14(r14);
+        static IRReg ir_r15(r15);
+        switch (reg_id) {
+            case rax:
+                return &ir_rax;
+            case rbx:
+                return &ir_rbx;
+            case rcx:
+                return &ir_rcx;
+            case rdx:
+                return &ir_rdx;
+            case rsi:
+                return &ir_rsi;
+            case rdi:
+                return &ir_rsi;
+            case rbp:
+                return &ir_rbp;
+            case rsp:
+                return &ir_rsp;
+            case r8:
+                return &ir_r8;
+            case r9:
+                return &ir_r9;
+            case r10:
+                return &ir_r10;
+            case r11:
+                return &ir_r11;
+            case r12:
+                return &ir_r12;
+            case r13:
+                return &ir_r13;
+            case r14:
+                return &ir_r14;
+            case r15:
+                return &ir_r15;
+            default:
+                return nullptr;
+        }
+    }
+
+    reg_type reg_;
 };
 
 class IRUnary : public IRExpr {
@@ -661,6 +721,7 @@ public:
         os << ";";
     }
 
+    bool is_last_return_ = false;
     IRExpr *ret_val_ = nullptr;
 };
 

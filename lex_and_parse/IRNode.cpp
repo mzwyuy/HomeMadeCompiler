@@ -338,6 +338,12 @@ IRStmt *ParseIR::ParseDeclTail(IRType *type, bool is_func_port, IRVarDecl *var_d
         auto func_decl = new IRFuncDecl();
         func_decl->func_ = (IRFunc *) cur_scope;
         func_decl->func_->ret_type_ = type;
+
+        if (type->base_type_ != IRType::TVoid) {
+            auto last_stmt = ((IRFunc *) cur_scope)->stmts_.back();
+            assert(last_stmt->ClassId() == IR_Return);
+            ((IRReturn*)last_stmt)->is_last_return_ = true;
+        }
         return func_decl;
     }
 }

@@ -19,18 +19,23 @@ enum InstOperator {
     OP_AND, OP_OR,
 
     OP_LDREF, OP_RDREF,  //*x = y, x = *y
-    OP_JMP,  // conditional jump
-    OP_JEQU, OP_JNEQU, OP_JNE, // unconditional jump
+    OP_CMP,
+    OP_TEST,  // bitwise AND operator
+    OP_JMP,  // unconditional jump
+    OP_JE, OP_JNE, OP_JG, OP_JGE, OP_JL, OP_JLE,  // conditional jump
     OP_ARG,
     OP_PROC,  // func();
     OP_CALL,  // x = func();
     OP_RET,  // return;
-    OP_RETV  // return x;
+    OP_PUSH,
+    OP_POP,
 };
 
 class QuadInst {
 public:
-    QuadInst(InstOperator op, IRVar* result, IRVar* left, IRVar* right = nullptr) : op_(op), result_(result), left_(left), right_(right) {}
+    QuadInst(InstOperator op, IRTemp* result, IRTemp* left, IRTemp* right) : op_(op), result_(result), left_(left), right_(right) {}
+    // comparison operators, result is in flag registers
+    QuadInst(InstOperator op, IRTemp* left, IRTemp* right = nullptr) : op_(op), left_(left), right_(right) {}
     QuadInst(InstOperator op, IRFunc* func) : op_(op), func_(func) {}
     QuadInst(InstOperator op, QuadInst* jmp_target) : op_(op), jmp_target_(jmp_target) {}
     QuadInst(InstOperator op, unsigned label) : op_(op), label_(label) {}
@@ -38,9 +43,9 @@ public:
     InstOperator op_;
     union {
         struct {
-            IRVar *result_;
-            IRVar *left_;
-            IRVar *right_;
+            IRTemp *result_;
+            IRTemp *left_;
+            IRTemp *right_;
         };
         IRFunc *func_;
         QuadInst *jmp_target_;
@@ -53,8 +58,9 @@ public:
     QuadCodeEmitter(IRCodeBlock* block) : global_block_(block) {}
     void EmitStmt(IRStmt* stmt);
     void EmitFunc(IRFunc* func);
-    void EmitExpr(IRExpr* expr);
-    void EmitGlobalVars();  // static var or glabal vars
+    void EmitExpr(IRExpr* expr, IRTemp* result_storer = nullptr);
+    void EmitBoolean(IRExpr* expr, std::vector<QuadInst**>& jmp_true, std::vector<QuadInst**>& jmp_false);
+    void EmitGlobalVars();  // static var or global vars
     // local vars cache important temp result, such as frequently-used results
     // first, vars chose by users are viewed as local vars, but these may be used once and are most likely used only in registers
     // second, frequently-used results are viewed as local vars
@@ -62,7 +68,11 @@ public:
 private:
     bool is_cur_block_global_ = false;
     unsigned label_count_ = 0;
+    IRTemp* last_expr_ = nullptr;
     IRCodeBlock* global_block_ = nullptr;
+    QuadInst* loop_begin_ = nullptr;
     std::vector<QuadInst *> quad_insts_{};
+    std::vector<QuadInst*> breaks_{};  // at the end of loop, backfill jmp point of breaks
+    std::vector<QuadInst*> returns_{};
     std::vector<IRTemp*> temps_;
 };
