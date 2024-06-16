@@ -16,7 +16,7 @@ enum IRClassType : unsigned {
     IR_Stmt, IR_CodeBlock, IR_Func, IR_VarDecl, IR_FuncDecl, IR_ExprStmt, IR_IfElse, IR_For,
     IR_While, IR_Break, IR_Continue, IR_Return, IR_Null,
 
-    IR_Expr, IR_Const, IR_Num, IR_Char, IR_Str, IR_Var, IR_Temp, IR_Reg, IR_Unary,
+    IR_Expr, IR_ASM_Operand, IR_Const, IR_Num, IR_Char, IR_StrLiteral, IR_Temp, IR_Var, IR_Reg, IR_Unary,
     IR_Binary, IR_FuncCall, IR_SysFuncCall
 };
 
@@ -62,6 +62,7 @@ class IRType;
 class IRVar;
 
 class IRScope;
+class IRCodeBlock;
 
 class IRStmt;
 
@@ -150,7 +151,15 @@ public:
     virtual IRClassType ClassId() {return IR_Expr;}
 };
 
-class IRConst : public IRExpr {
+// only used to record temp results
+class IRAsmOperand : public IRExpr {
+public:
+    OPERATOR_NEW
+    IRClassType ClassId() {return IR_ASM_Operand;}
+};
+
+// can also be named as IRImmediate
+class IRConst : public IRAsmOperand {
 public:
     OPERATOR_NEW
 
@@ -161,6 +170,7 @@ public:
 
 class IRNum : public IRConst {
 public:
+    IRNum(uint64_t  val) : val_(val) {}
     OPERATOR_NEW
 
     virtual void Display(std::ostream &os, unsigned lv = 0) {
@@ -183,26 +193,26 @@ public:
     char ch_ = 0;
 };
 
-class IRStr : public IRConst {
+// store string literal
+class IRStrLiteral : public IRConst {
 public:
-    ~IRStr() {// if (str_) free(str_);
+    ~IRStrLiteral() {// if (str_) free(str_);
     }
     OPERATOR_NEW
 
     virtual void Display(std::ostream& os, unsigned lv = 0) {
         os << "\"" << str_ << "\"";
     }
-    IRClassType ClassId() {return IR_Str;}
+    IRClassType ClassId() {return IR_StrLiteral;}
     string str_;
 };
 
 // only used to record temp results
-class IRTemp : public IRExpr {
+class IRTemp : public IRAsmOperand {
 public:
     OPERATOR_NEW
     IRClassType ClassId() {return IR_Temp;}
-    unsigned num_ = 0;
-    IRType* type_ = nullptr;
+    enum {ONE_BYTE = 1, TWO_BYTE = 2, FOUR_BYTE = 4, EIGHT_BYTE = 8} width_ = EIGHT_BYTE;
 };
 
 class IRVar : public IRTemp {
@@ -219,9 +229,13 @@ public:
     }
     IRClassType ClassId() {return IR_Var;}
 
-    bool is_externed_ = false;
-    bool is_left_ = true;
+    struct {
+        bool is_externed_ = false;
+        bool is_left_ = true;
+        bool is_global_or_static_ = false;
+    };
     int offset_ = 0;
+    IRType* type_ = nullptr;
     IRExpr *initial_val_ = nullptr;
     IRScope *scope_ = nullptr;  // need?
     std::string name_;
@@ -232,9 +246,7 @@ class IRReg : public IRTemp {
 public:
     enum reg_type {rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14, r15};
 private:
-    IRReg(reg_type reg_id) : reg_(reg_id) {
-        type_ = nullptr;
-    }
+    IRReg(reg_type reg_id) : reg_(reg_id) {}
 public:
     OPERATOR_NEW
     IRClassType ClassId() {return IR_Reg;}
@@ -369,35 +381,13 @@ public:
 
 class IRScope {
 public:
+    static const std::string empty_name;
+    static const std::string temp_name;
     IRScope(const std::string &name) : name_(name) {}
 
     IRScope(std::string &&name) : name_(std::move(name)) {}
 
-    IRVar *CreateNewVar(const std::string &name, IRType *type) {
-        IRVar *new_node = nullptr;
-        if (name.empty()) {
-            auto unique_name = GetUniqueName();
-            new_node = new IRVar(unique_name);
-            name_to_vars_[unique_name] = new_node;
-        } else {
-            assert(!name_to_vars_.count(name));
-            new_node = new IRVar(name);
-            name_to_vars_[name] = new_node;  // todo: should allow same name in different layer's scope
-        }
-        vars_.push_back(new_node);
-
-        assert(type);
-        new_node->type_ = type;
-        unsigned len = type->GetSize();
-        unsigned alignment = std::min(len, (unsigned) ALIGN_VAL);
-        unsigned padding = alignment - size_ % alignment;
-        new_node->offset_ = size_ + padding;
-        size_ = size_ + padding + len;
-
-        largest_len_ = std::max(largest_len_, len);
-
-        return new_node;
-    }
+    IRVar *CreateNewVar(const std::string &name, IRType *type);
 
     IRVar *SearchVar(const std::string &name) {
         auto it = name_to_vars_.find(name);
@@ -434,7 +424,7 @@ protected:
 public:
     std::string name_;
     std::vector<IRScope *> scopes_;
-    std::vector<IRVar *> vars_;
+    std::vector<IRTemp *> vars_;
     std::unordered_map<std::string, IRVar *> name_to_vars_;
     // std::vector<InterInst*> inter_insts_;
     IRScope *upper_ = nullptr;

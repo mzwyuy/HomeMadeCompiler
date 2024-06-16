@@ -21,8 +21,8 @@ enum KeyWord {
     /*used in unary expr*/
     KW_NOT, KW_NEGATE, KW_POSITIVE, KW_LEA, KW_DEREF, KW_LINC, KW_LDEC, KW_RDEC, KW_RINC,
     /*used in binary expr*/
-    KW_ADD, KW_SUB, KW_MUL, KW_DIV, KW_MOD,
-    KW_AND, KW_OR, KW_BIT_AND, KW_ASSIGN, KW_GT,
+    KW_ADD, KW_SUB, KW_MUL, KW_DIV, KW_MOD, KW_BIT_AND, KW_BIT_OR, KW_ASSIGN,
+    KW_AND, KW_OR, KW_GT,
     KW_GE, KW_LT, KW_LE, KW_EQUAL, KW_NEQUAL, KW_SUBTRACT_EQ, KW_ADD_EQ, KW_DIV_EQ,/*-=, +=*/
     /*generic tokens*/
     KW_COMMA/*,*/, KW_COLON/*:*/, KW_SEMICOLON/*;*/,

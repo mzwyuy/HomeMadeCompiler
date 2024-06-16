@@ -2,6 +2,9 @@
 
 MemoryCollector memory_collect;
 
+const std::string IRScope::empty_name = {};
+const std::string IRScope::temp_name = "temp";
+
 const char *KeyWordToStr(KeyWord key_word) {
     switch (key_word) {
         case KW_NOT:
@@ -176,6 +179,38 @@ void IRVarDecl::Display(std::ostream &os, unsigned lv, bool new_line) {
         }
     }
     os << ";";
+}
+
+IRVar *IRScope::CreateNewVar(const std::string &name, IRType *type) {
+    IRVar *new_node = nullptr;
+    if (name.empty()) {
+        auto unique_name = GetUniqueName();
+        new_node = new IRVar(unique_name);
+        name_to_vars_[unique_name] = new_node;
+    } else {
+        assert(!name_to_vars_.count(name));
+        new_node = new IRVar(name);
+        name_to_vars_[name] = new_node;  // todo: should allow same name in different layer's scope
+    }
+    vars_.push_back(new_node);
+
+    if (IsCodeBlock()) {
+        new_node->is_global_or_static_ = ((IRCodeBlock*)this)->IsGlobal();
+    } else {
+        // todo: class's static var
+    }
+
+    assert(type);
+    new_node->type_ = type;
+    unsigned len = type->GetSize();
+    unsigned alignment = std::min(len, (unsigned) ALIGN_VAL);
+    unsigned padding = alignment - size_ % alignment;
+    new_node->offset_ = size_ + padding;
+    size_ = size_ + padding + len;
+
+    largest_len_ = std::max(largest_len_, len);
+
+    return new_node;
 }
 
 void IRFunc::Display(std::ostream &os, unsigned lv) {
@@ -545,7 +580,7 @@ IRExpr *ParseIR::ParseExpr() {
             is_operand = true;
         } else if (token->IsStr()) {
             step();
-            IRStr* ir_str = new IRStr();
+            IRStrLiteral* ir_str = new IRStrLiteral();
             ir_str->str_ = token->GetStr();
             exprs.push(ir_str);
             is_operand = true;
