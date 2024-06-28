@@ -14,16 +14,15 @@ enum InstOperator {
     // ! - & *
     OP_NOT, OP_NEG, OP_LEA, OP_DREF,
 
-    OP_GT, OP_GE, OP_LT, OP_LE, OP_EQU, OP_NE,
+    OP_SETG, OP_SETGE, OP_SETL, OP_SETLE, OP_SETE, OP_SETNE,
 
     OP_AND, OP_OR,
 
     OP_LDREF, OP_RDREF,  //*x = y, x = *y
     OP_CMP,
     OP_TEST,  // bitwise AND operator
-    OP_SETE, OP_SETNE,  // == 0, ！= 0
     OP_JMP,  // unconditional jump
-    OP_JE, OP_JNE, OP_JG, OP_JGE, OP_JL, OP_JLE,  // conditional jump
+    OP_JG, OP_JGE, OP_JL, OP_JLE, OP_JE, OP_JNE,  // conditional jump
     OP_ARG,
     OP_PROC,  // func();
     OP_CALL,  // x = func();
@@ -45,12 +44,9 @@ public:
         if (count == 0)
             ++count; // avoid std::malloc(0) which may return nullptr on success
 
-        if (void *ptr = std::malloc(count)) {
-            quad_insts_.push_back((QuadInst*)ptr);
-            return ptr;
-        } else {
-            return nullptr;
-        }
+        void *ptr = std::malloc(count);
+        quad_insts_.push_back((QuadInst *) ptr);
+        return ptr;
     }
 
     InstOperator op_;
@@ -87,9 +83,10 @@ private:
     // IRTemp* last_expr_ = nullptr; maybe not used
     IRCodeBlock* global_block_ = nullptr;
     IRScope* cur_scope_ = nullptr;
-    QuadInst* loop_begin_ = nullptr;
     std::vector<QuadInst*> quad_insts_{};
-    std::vector<QuadInst*> breaks_{};  // at the end of loop, backfill jmp point of breaks
     std::vector<QuadInst*> returns_{};
+    std::stack<std::vector<QuadInst*>> breaks_{};  // at the end of loop, backfill jmp point of breaks
+    std::stack<std::vector<QuadInst*>> continues_{};
     std::vector<IRAsmOperand*> temps_;
+    std::unordered_map<IRFunc*, QuadInst*> func_addr_map_;
 };

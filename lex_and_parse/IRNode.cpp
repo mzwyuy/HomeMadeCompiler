@@ -568,7 +568,7 @@ IRExpr *ParseIR::ParseExpr() {
             is_operand = true;
         } else if (token->IsNum()) {
             step();
-            IRNum *number = new IRNum();
+            IRNum *number = new IRNum(0);
             number->val_ = token->GetNum();
             exprs.push(number);
             is_operand = true;

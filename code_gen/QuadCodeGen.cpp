@@ -2,6 +2,7 @@
 // Created by tom_cat233 on 25/5/2024.
 //
 #include "QuadCodeGen.h"
+#include <array>
 
 std::vector<QuadInst *> QuadInst::quad_insts_{};
 
@@ -69,53 +70,64 @@ void QuadCodeEmitter::EmitStmt(IRStmt* stmt) {
             auto else_stmt = ((IRIfElse *) stmt)->else_stmt_;
             unsigned inst_cnt = 0;
 
-            if (condition->ClassId() == IR_Binary) {
-                auto op = ((IRBinary*)condition)->op_;
-                if (op == KW_NOT || op == KW_AND || op == KW_OR) {  // logical operators
-                    std::vector<QuadInst **> jmp_true;
-                    std::vector<QuadInst **> jmp_false;
-                    // todo: EmitBoolean(condition, jmp_true, jmp_false);
-
-                    auto then_stmt = ((IRIfElse *) stmt)->then_stmt_;
-                    assert(then_stmt);
-                    inst_cnt = quad_insts_.size();
-                    EmitStmt(then_stmt);
-                    inst = quad_insts_[inst_cnt];
-                    for (auto i : jmp_true) {
-                        *i = inst;
-                    }
-
-                    inst_cnt = quad_insts_.size();
-                    if (else_stmt) {
-                        EmitStmt(else_stmt);
-                        inst = quad_insts_[inst_cnt];
-                    } else {
-                        inst = new QuadInst(OP_LABEL, label_count_++);
-                    }
-                    for (auto i: jmp_false) {
-                        *i = inst;
-                    }
-                    break;
+            std::vector<QuadInst *> jmp_true;
+            std::vector<QuadInst *> jmp_false;
+            IRAsmOperand* last_expr = EmitExpr(condition, nullptr, &jmp_true, &jmp_false);
+            if (is_logic_operators_) {
+                EmitStmt(then_stmt);
+                inst = new QuadInst(OP_LABEL, label_count_++);
+                for (auto i : jmp_false) {
+                    i->jmp_target_ = inst;
                 }
-            }
-            // todo: change comparison binary operators condition to je, jne, jg, jge, jl or jle to improve perf
-            IRAsmOperand* last_expr = EmitExpr(condition);
-            inst = new QuadInst(OP_CMP, nullptr, last_expr, last_expr);
-            inst = new QuadInst(OP_JE, (QuadInst*)nullptr);
-            EmitStmt(then_stmt);
-
-            inst_cnt = quad_insts_.size();
-            if (else_stmt) {
+                EmitStmt(else_stmt);
+            } else {
+                inst = new QuadInst(OP_TEST, nullptr, last_expr, last_expr);
+                auto jmp_inst = new QuadInst(OP_JE, (QuadInst *) nullptr);
+                EmitStmt(then_stmt);
+                inst = new QuadInst(OP_LABEL, label_count_++);
+                jmp_inst->jmp_target_ = inst;
                 EmitStmt(else_stmt);
             }
-            inst->jmp_target_ = quad_insts_[inst_cnt];
 
             break;
         }
-        case IR_For:
-            // todo: not support now
-            assert(0);
+        case IR_For: {
+            IRFor* ir_for = (IRFor*)stmt;
+            breaks_.emplace(std::vector<QuadInst*>{});
+            continues_.emplace(std::vector<QuadInst*>{});
+            EmitStmt(ir_for->init_);
+            std::vector<QuadInst*> jmp_true{}, jmp_false{};
+            QuadInst* loop_begin = new QuadInst(OP_LABEL, label_count_++);
+
+            auto condition = EmitExpr(ir_for->condition_, nullptr, &jmp_true, &jmp_false);
+            if (!is_logic_operators_) {
+                inst = new QuadInst(OP_TEST, nullptr, condition, condition);
+                inst = new QuadInst(OP_JE, (QuadInst*) nullptr);
+                jmp_false.push_back(inst);
+            }
+            EmitStmt(ir_for->for_body_);
+            inst = new QuadInst(OP_LABEL, label_count_++);
+            auto& continues = continues_.top();
+            for (auto i : continues) {
+                i->jmp_target_ = inst;
+            }
+            EmitStmt(ir_for->iteration_);
+
+            inst = new QuadInst(OP_JMP, loop_begin);
+
+            inst = new QuadInst(OP_LABEL, label_count_++);
+            auto& breaks = breaks_.top();
+            for (auto i : breaks) {
+                i->jmp_target_ = inst;
+            }
+            for (auto i : jmp_false) {
+                i->jmp_target_ = inst;
+            }
+            breaks_.pop();
+            continues_.pop();
+
             break;
+        }
         case IR_While: {
             /* if (temp) {        label0
              *     stmt0          calc temp
@@ -127,28 +139,46 @@ void QuadCodeEmitter::EmitStmt(IRStmt* stmt) {
              *                    stmt1
              * */
             QuadInst *label_inst = new QuadInst(OP_LABEL, label_count_++);
-            quad_insts_.push_back(label_inst);
-            auto result = EmitExpr(((IRWhile *) stmt)->condition_);
-            assert(result);
-            inst = new QuadInst(OP_TEST, nullptr, result, result);
-            QuadInst *jmp_inst = new QuadInst(OP_JE, (QuadInst *) nullptr);
+            std::vector<QuadInst*> jmp_true{}, jmp_false{};
+            breaks_.emplace(std::vector<QuadInst*>{});
+            continues_.emplace(std::vector<QuadInst*>{});
+
+            auto condition = EmitExpr(((IRWhile *) stmt)->condition_, nullptr, &jmp_true, &jmp_false);
+            if (!is_logic_operators_) {
+                inst = new QuadInst(OP_TEST, nullptr, condition, condition);
+                QuadInst *jmp_inst = new QuadInst(OP_JE, (QuadInst *) nullptr);
+                jmp_false.push_back(jmp_inst);
+            }
 
             EmitStmt(((IRWhile *) stmt)->while_body_);
             inst = new QuadInst(OP_JMP, label_inst);
             inst = new QuadInst(OP_LABEL, label_count_++);
-            jmp_inst->jmp_target_ = inst;
 
-            for (auto i : breaks_) {
+            auto& continues = continues_.top();
+            for (auto i : continues) {
+                i->jmp_target_ = label_inst;
+            }
+            auto& breaks = breaks_.top();
+            for (auto i : breaks) {
                 i->jmp_target_ = inst;
             }
+            for (auto i : jmp_false) {
+                i->jmp_target_ = inst;
+            }
+            breaks_.pop();
+            continues_.pop();
+
             break;
         }
         case IR_Break:
             inst = new QuadInst(OP_JMP, (QuadInst*)nullptr);
-            breaks_.push_back(inst);
+            assert(!breaks_.empty());
+            breaks_.top().push_back(inst);
             break;
         case IR_Continue:
-            inst = new QuadInst(OP_JMP, loop_begin_);
+            inst = new QuadInst(OP_JMP, (QuadInst*) nullptr);
+            assert(!continues_.empty());
+            continues_.top().push_back(inst);
             break;
         case IR_Return:
             if (((IRReturn*)stmt)->is_last_return_) {
@@ -187,12 +217,12 @@ IRAsmOperand *QuadCodeEmitter::EmitExpr(IRExpr *expr, IRTemp *result_storer, std
      *   logic this, not logic next            no ret, need convert         need ret, need convert
      *   not logic this, logic next                    need ret                   need ret
      *   not logic this, not next                      need ret                   need ret
-     *
      */
     assert((result_storer && !jmp_true) || (!result_storer && jmp_true));
     assert((jmp_true && jmp_false) || (!jmp_true && !jmp_false));
     assert(expr);
     is_cur_block_global_ = false;
+    is_logic_operators_ = false;
     QuadInst *inst = nullptr;
     switch (expr->ClassId()) {
         case IR_Num:
@@ -221,17 +251,21 @@ IRAsmOperand *QuadCodeEmitter::EmitExpr(IRExpr *expr, IRTemp *result_storer, std
                     auto var = (IRVar*)((IRUnary*)expr)->rval_;
                     IRNum* num = new IRNum(1);
                     inst = new QuadInst(op == KW_LINC ? OP_ADD : OP_SUB, var, var, num);
-                    if (result_storer != var) {
+                    if (result_storer && result_storer != var) {
                         inst = new QuadInst(OP_ASSIGN, result_storer, var, nullptr);
+                        return result_storer;
+                    } else {
+                        return var;
                     }
-                    return var;
                 }
                 case KW_NOT: {
                     // logic operators: and, or and not, owing to short-circuit evaluation, && and || must use jump
-                    is_logic_operators_ = true;
+                    bool saved_logic_operators;
                     if (jmp_true) {
                         auto rval_temp = EmitExpr(rval, nullptr, jmp_false, jmp_true);
-                        if (is_logic_operators_) {
+                        saved_logic_operators = is_logic_operators_;
+                        is_logic_operators_ = true;
+                        if (saved_logic_operators) {
                             return nullptr;  // don't need return anything, just jmp
                         } else {
                             inst = new QuadInst(OP_TEST, nullptr, rval_temp, rval_temp);
@@ -246,12 +280,14 @@ IRAsmOperand *QuadCodeEmitter::EmitExpr(IRExpr *expr, IRTemp *result_storer, std
                     }
                     std::vector<QuadInst *> jmp_true_internal, jmp_false_internal;
                     auto rval_temp = EmitExpr(rval, nullptr, &jmp_true_internal, &jmp_false_internal);
-                    if (is_logic_operators_) {
+                    saved_logic_operators = is_logic_operators_;
+                    is_logic_operators_ = true;
+                    if (saved_logic_operators) {
                         inst = new QuadInst(OP_LABEL, label_count_++);
                         for (auto i : jmp_false_internal) {
                             i->jmp_target_ = inst;
                         }
-                        IRTemp* result = result_storer ? result_storer : new IRTemp{};
+                        IRTemp* result = result_storer ? result_storer : cur_scope_->CreateTemp(nullptr);
                         inst = new QuadInst(OP_ASSIGN, result, new IRNum(1), nullptr);
                         auto end_jmp = new QuadInst(OP_JMP, (QuadInst*)nullptr);
 
@@ -271,7 +307,7 @@ IRAsmOperand *QuadCodeEmitter::EmitExpr(IRExpr *expr, IRTemp *result_storer, std
                         result_storer->width_ = IRTemp::ONE_BYTE;  // todo: need?
                         return result_storer;
                     } else {
-                        IRTemp* result = new IRTemp{};
+                        IRTemp* result = cur_scope_->CreateTemp(nullptr);
                         inst = new QuadInst(OP_SETE, result, nullptr,  nullptr);
                         result->width_ = IRTemp::ONE_BYTE;  // todo: need?
                         return result;
@@ -279,14 +315,11 @@ IRAsmOperand *QuadCodeEmitter::EmitExpr(IRExpr *expr, IRTemp *result_storer, std
                 }
                 case KW_NEGATE: {
                     auto rval_temp = EmitExpr(rval);
-                    if (result_storer) {
-                        inst = new QuadInst(OP_NEG, result_storer, rval_temp, nullptr);
-                        return result_storer;
-                    } else {
-                        IRTemp* result = new IRTemp{};
-                        inst = new QuadInst(OP_NEG, result, rval_temp, nullptr);
-                        return result;
+                    if (!result_storer) {
+                        result_storer = cur_scope_->CreateTemp(nullptr);
                     }
+                    inst = new QuadInst(OP_NEG, result_storer, rval_temp, nullptr);
+                    return result_storer;
                 }
                 case KW_LEA: {
                     // todo: index select is not var!
@@ -296,7 +329,7 @@ IRAsmOperand *QuadCodeEmitter::EmitExpr(IRExpr *expr, IRTemp *result_storer, std
                         inst = new QuadInst(OP_LEA, result_storer, var, nullptr);
                         return result_storer;
                     } else {
-                        IRTemp* result = new IRTemp{};
+                        IRTemp* result = cur_scope_->CreateTemp(nullptr);
                         inst = new QuadInst(OP_LEA, result, var, nullptr);
                         return result;
                     }
@@ -308,7 +341,7 @@ IRAsmOperand *QuadCodeEmitter::EmitExpr(IRExpr *expr, IRTemp *result_storer, std
                         inst = new QuadInst(OP_DREF, result_storer, rval_temp, nullptr);
                         return result_storer;
                     } else {
-                        IRTemp* result = new IRTemp{};
+                        IRTemp* result = cur_scope_->CreateTemp(nullptr);
                         inst = new QuadInst(OP_DREF, result, rval_temp, nullptr);
                         return result;
                     }
@@ -321,7 +354,7 @@ IRAsmOperand *QuadCodeEmitter::EmitExpr(IRExpr *expr, IRTemp *result_storer, std
                     IRNum* num = new IRNum(1);
                     IRTemp* result = nullptr;
                     if (result_storer != var) {
-                        result = new IRTemp{};
+                        result = cur_scope_->CreateTemp(nullptr);
                         inst = new QuadInst(OP_ASSIGN, result, var, nullptr);
                     } else {
                         result = var;
@@ -354,9 +387,11 @@ IRAsmOperand *QuadCodeEmitter::EmitExpr(IRExpr *expr, IRTemp *result_storer, std
                     left_temp = EmitExpr(left, nullptr);
                     right_temp = EmitExpr(right, nullptr);
 
-                    IRTemp* result = new IRTemp{};  // todo: consider width
-                    inst = new QuadInst(binary_operators_[op - KW_AND], result, left_temp, right_temp);
-                    return result;
+                    if (!result_storer) {
+                        result_storer = cur_scope_->CreateTemp(nullptr);  // todo: consider width
+                    }
+                    inst = new QuadInst(binary_operators_[op - KW_AND], result_storer, left_temp, right_temp);
+                    return result_storer;
                 }
                 case KW_ASSIGN: {
                     right_temp = EmitExpr(right, nullptr);
@@ -365,27 +400,198 @@ IRAsmOperand *QuadCodeEmitter::EmitExpr(IRExpr *expr, IRTemp *result_storer, std
                     inst = new QuadInst(OP_ASSIGN, (IRVar*)left, right_temp, nullptr);
                     return (IRVar*)left;
                 }
-                case KW_AND:
-                case KW_OR: {
-                    is_logic_operators_ = true;
+                case KW_AND: {
+                    std::vector<QuadInst *> jmp_true_internal{}, jmp_false_internal{};
+                    auto left_temp = EmitExpr(left, nullptr, &jmp_true_internal,
+                                              jmp_false ? jmp_false : &jmp_false_internal);
+                    if (!is_logic_operators_) {
+                        inst = new QuadInst(OP_TEST, nullptr, left_temp, left_temp);
+                        // save the time consumption of a jump to left's true exit
+                        inst = new QuadInst(OP_JE, (QuadInst *) nullptr);
+                        if (jmp_false) {
+                            jmp_false->push_back(inst);
+                        } else {
+                            jmp_false_internal.push_back(inst);
+                        }
+                    }
+                    inst = new QuadInst(OP_LABEL, label_count_++);
+                    for (auto i: jmp_true_internal) {
+                        i->jmp_target_ = inst;
+                    }
+                    jmp_true_internal.clear();
 
+                    auto right_temp = EmitExpr(right, nullptr, jmp_true ? jmp_true : &jmp_true_internal,
+                                               jmp_false ? jmp_false : &jmp_false_internal);
+                    if (!is_logic_operators_) {
+                        inst = new QuadInst(OP_TEST, nullptr, right_temp, right_temp);
+                        inst = new QuadInst(OP_JNE, (QuadInst *) nullptr);
+                        if (jmp_true) {
+                            jmp_true->push_back(inst);
+                        } else {
+                            jmp_true_internal.push_back(inst);
+                        }
+                        inst = new QuadInst(OP_JMP, (QuadInst *) nullptr);
+                        if (jmp_false) {
+                            jmp_false->push_back(inst);
+                        } else {
+                            jmp_false_internal.push_back(inst);
+                        }
+                    }
+
+                    is_logic_operators_ = true;
+                    if (jmp_true) {
+                        return nullptr;
+                    }
+                    IRTemp* result = nullptr;
+                    if (!result_storer) {
+                        result = cur_scope_->CreateTemp(nullptr);
+                    } else {
+                        result = result_storer;
+                    }
+                    inst = new QuadInst(OP_LABEL, label_count_++);
+                    for (auto i: jmp_true_internal) {
+                        i->jmp_target_ = inst;
+                    }
+                    inst = new QuadInst(OP_ASSIGN, result, new IRNum(1), nullptr);
+                    auto jmp_inst = new QuadInst(OP_JMP, (QuadInst *) nullptr);
+                    inst = new QuadInst(OP_LABEL, label_count_++);
+                    for (auto i: jmp_false_internal) {
+                        i->jmp_target_ = inst;
+                    }
+                    inst = new QuadInst(OP_ASSIGN, result, new IRNum(0), nullptr);
+                    inst = new QuadInst(OP_LABEL, label_count_++);
+                    jmp_inst->jmp_target_ = inst;
+                    return result;
+                }
+                case KW_OR: {
+                    std::vector<QuadInst *> jmp_true_internal{}, jmp_false_internal{};
+                    auto left_temp = EmitExpr(left, nullptr, jmp_true ? jmp_true : &jmp_true_internal,
+                                              &jmp_false_internal);
+                    if (!is_logic_operators_) {
+                        inst = new QuadInst(OP_TEST, nullptr, left_temp, left_temp);
+                        // save the time consumption of a jump to left's true exit
+                        inst = new QuadInst(OP_JNE, (QuadInst *) nullptr);
+                        if (jmp_true) {
+                            jmp_true->push_back(inst);
+                        } else {
+                            jmp_true_internal.push_back(inst);
+                        }
+                    }
+                    inst = new QuadInst(OP_LABEL, label_count_++);
+                    for (auto i: jmp_false_internal) {
+                        i->jmp_target_ = inst;
+                    }
+                    jmp_true_internal.clear();
+
+                    auto right_temp = EmitExpr(right, nullptr, jmp_true ? jmp_true : &jmp_true_internal,
+                                               jmp_false ? jmp_false : &jmp_false_internal);
+                    if (!is_logic_operators_) {
+                        inst = new QuadInst(OP_TEST, nullptr, right_temp, right_temp);
+                        inst = new QuadInst(OP_JNE, (QuadInst *) nullptr);
+                        if (jmp_true) {
+                            jmp_true->push_back(inst);
+                        } else {
+                            jmp_true_internal.push_back(inst);
+                        }
+                        inst = new QuadInst(OP_JMP, (QuadInst *) nullptr);
+                        if (jmp_false) {
+                            jmp_false->push_back(inst);
+                        } else {
+                            jmp_false_internal.push_back(inst);
+                        }
+                    }
+
+                    is_logic_operators_ = true;
+                    if (jmp_true) {
+                        return nullptr;
+                    }
+                    IRTemp* result = nullptr;
+                    if (!result_storer) {
+                        result = cur_scope_->CreateTemp(nullptr);
+                    } else {
+                        result = result_storer;
+                    }
+                    inst = new QuadInst(OP_LABEL, label_count_++);
+                    for (auto i: jmp_true_internal) {
+                        i->jmp_target_ = inst;
+                    }
+                    inst = new QuadInst(OP_ASSIGN, result, new IRNum(1), nullptr);
+                    auto jmp_inst = new QuadInst(OP_JMP, (QuadInst *) nullptr);
+                    inst = new QuadInst(OP_LABEL, label_count_++);
+                    for (auto i: jmp_false_internal) {
+                        i->jmp_target_ = inst;
+                    }
+                    inst = new QuadInst(OP_ASSIGN, result, new IRNum(0), nullptr);
+                    inst = new QuadInst(OP_LABEL, label_count_++);
+                    jmp_inst->jmp_target_ = inst;
+                    return result;
                 }
                 case KW_GT:
                 case KW_GE:
                 case KW_LT:
                 case KW_LE:
-
                 case KW_EQUAL:
-                case KW_NEQUAL:
+                case KW_NEQUAL: {
+                    static const std::array<InstOperator, 6> jmp_operators = {OP_JG, OP_JGE, OP_JL, OP_JLE, OP_JE, OP_JNE};
+                    static const std::array<InstOperator, 6> set_operators = {OP_SETG, OP_SETGE, OP_SETL, OP_SETLE, OP_SETE, OP_SETNE};
+
+                    auto left_temp = EmitExpr(left, nullptr, nullptr, nullptr);
+                    auto right_temp = EmitExpr(right, nullptr, nullptr, nullptr);
+
+                    inst = new QuadInst(OP_CMP, nullptr, left_temp, right_temp);
+                    if (jmp_true) {
+                        inst = new QuadInst(jmp_operators[op - KW_GT], (QuadInst*) nullptr);
+                        jmp_true->push_back(inst);
+                        inst = new QuadInst(OP_JMP, (QuadInst*) nullptr);
+                        jmp_false->push_back(inst);
+                        is_logic_operators_ = true;
+                        return nullptr;
+                    } else {
+                        IRTemp* result = nullptr;
+                        if (result_storer) {
+                            result = result_storer;
+                        } else {
+                            result = cur_scope_->CreateTemp(nullptr);
+                        }
+                        inst = new QuadInst(set_operators[op - KW_GT], result, nullptr, nullptr);
+                        is_logic_operators_ = false;
+                        return result;
+                    }
+                }
                 case KW_SUBTRACT_EQ:
-                case KW_ADD_EQ:
-                case KW_DIV_EQ:
+                case KW_ADD_EQ: {
+                    assert(left->ClassId() == IR_Var);
+                    auto right_temp = EmitExpr(right, nullptr, nullptr, nullptr);
+                    inst = new QuadInst(op == KW_SUBTRACT_EQ ? OP_SUB : OP_ADD, (IRVar*)left, (IRVar*)left, right_temp);
+                    return (IRVar*)left;
+                }
+                case KW_DIV_EQ: {
+                    assert(left->ClassId() == IR_Var);
+                    auto right_temp = EmitExpr(right, nullptr, nullptr, nullptr);
+                    inst = new QuadInst(OP_DIV, (IRVar *) left, (IRVar *) left, right_temp);
+                    return (IRVar *) left;
+                }
                 default:
-                    break;
+                    assert(0);
+                    return nullptr;
             }
         }
-        case IR_FuncCall:
+        case IR_FuncCall: {
+            auto ir_func_call = (IRFuncCall*)expr;
+            assert(ir_func_call->args_.size() <= 4);
+            auto size = ir_func_call->args_.size();
+            static const std::array<IRReg*, 4> regs = {IRReg::GetReg(IRReg::rcx), IRReg::GetReg(IRReg::rdx), IRReg::GetReg(IRReg::r8), IRReg::GetReg(IRReg::r9)};
+            for (unsigned i = 0; i < size; i++) {
+                EmitExpr(ir_func_call->args_[i], regs[i], nullptr, nullptr);
+            }
+            auto it = func_addr_map_.find(ir_func_call->func_);
+            assert(it != func_addr_map_.end());
+            QuadInst* call_inst = it->second;
+            inst = new QuadInst(OP_CALL, call_inst);
+            return IRReg::GetReg(IRReg::rax);
+        }
         case IR_SysFuncCall:
+            assert(0);
             return nullptr;
         default:
             return nullptr;

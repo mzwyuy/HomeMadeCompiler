@@ -388,6 +388,11 @@ public:
     IRScope(std::string &&name) : name_(std::move(name)) {}
 
     IRVar *CreateNewVar(const std::string &name, IRType *type);
+    IRTemp* CreateTemp(IRType* type) {
+        auto ret = new IRTemp();
+        vars_.push_back(ret);
+        return ret;
+    }
 
     IRVar *SearchVar(const std::string &name) {
         auto it = name_to_vars_.find(name);
@@ -795,9 +800,9 @@ public:
     IRVar *ParseLea(IRVar *var);
 
 private:
+    unsigned cur_pos_ = 0;
     SymTable *sym_table_ = nullptr;
     IRCodeBlock *global_block_ = nullptr;
     std::vector<TinyToken *> tokens_;
-    unsigned cur_pos_ = 0;
     // std::vector<TinyToken *>::iterator iter;
 };
